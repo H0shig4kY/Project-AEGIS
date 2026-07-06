@@ -1,7 +1,5 @@
-# Project AEGIS
- 
-An open research initiative focused on Red Team operations, Active Directory, Microsoft Entra ID, Windows Internals, offensive tooling, and security research. 
+🛡️ Project AEGIS
 
-Mission  
+Research • Understand • Protect
 
-To document, understand, and share offensive security research while promoting responsible, ethical, and reproducible experimentation in authorized environments.
+An open cybersecurity research initiative focused on offensive security, identity, Windows Internals, and practical security tooling.
