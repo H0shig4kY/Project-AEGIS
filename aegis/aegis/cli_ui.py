@@ -12,13 +12,105 @@ from aegis.models import ChangeType
 
 console = Console()
 
+COMPACT_WIDTH = 100
+NARROW_WIDTH = 76
+
+_layout_override: bool | None = None
+
+
+def set_compact_mode(
+    enabled: bool | None,
+):
+    """
+    Override automatic terminal layout detection.
+
+    None:
+        Use the current terminal width automatically.
+
+    True:
+        Force compact layout.
+    """
+
+    global _layout_override
+    _layout_override = enabled
+
+
+def terminal_width() -> int:
+    """Return the current Rich console width."""
+
+    return console.size.width
+
+
+def terminal_is_compact() -> bool:
+    """Return True when the terminal should use compact layouts."""
+
+    if _layout_override is not None:
+        return _layout_override
+
+    return (
+        terminal_width()
+        < COMPACT_WIDTH
+    )
+
+
+def terminal_is_narrow() -> bool:
+    """Return True for particularly narrow terminals."""
+
+    return (
+        terminal_width()
+        < NARROW_WIDTH
+    )
+
 
 # ---------------------------------------------------------
 # BRANDING
 # ---------------------------------------------------------
 
 
+
 def print_banner():
+    if terminal_is_compact():
+        brand = Text()
+
+        brand.append(
+            "AEGIS",
+            style="bold cyan",
+        )
+
+        brand.append(
+            " / ",
+            style="dim",
+        )
+
+        brand.append(
+            "ARGUS",
+            style="bold magenta",
+        )
+
+        brand.append(
+            "\nAuthorized Reconnaissance, Asset Discovery "
+            "and Lifecycle Analysis Engine.",
+            style="bold white",
+        )
+
+        if not terminal_is_narrow():
+            brand.append(
+                "\nEvidence-driven reconnaissance with scope, "
+                "provenance and temporal change tracking.",
+                style="dim",
+            )
+
+        console.print(
+            Panel(
+                brand,
+                border_style="cyan",
+                box=box.ROUNDED,
+            )
+        )
+
+        console.print()
+        return
+
     banner = Text()
 
     banner.append(
@@ -65,7 +157,6 @@ def print_banner():
 
     console.print()
 
-
 def print_root_usage():
     usage = Text()
 
@@ -100,7 +191,55 @@ def print_root_usage():
     )
 
 
+
 def print_root_commands():
+    commands = [
+        (
+            "version",
+            "Show the installed AEGIS / ARGUS version.",
+        ),
+        (
+            "info",
+            "Show platform capabilities and lifecycle states.",
+        ),
+        (
+            "status",
+            "Show the current campaign operational overview.",
+        ),
+        (
+            "commands",
+            "Show common commands and practical examples.",
+        ),
+        (
+            "init",
+            "Create a new assessment campaign.",
+        ),
+        (
+            "scope",
+            "Manage the authorized assessment scope.",
+        ),
+        (
+            "plugin",
+            "List and execute reconnaissance plugins.",
+        ),
+        (
+            "assets",
+            "Inspect discovered assets, graphs and lifecycle history.",
+        ),
+        (
+            "relations",
+            "Inspect relationships between discovered assets.",
+        ),
+        (
+            "changes",
+            "Inspect asset and relation lifecycle changes.",
+        ),
+        (
+            "results",
+            "Inspect and verify persisted plugin results.",
+        ),
+    ]
+
     table = Table(
         show_header=False,
         box=box.ROUNDED,
@@ -109,85 +248,36 @@ def print_root_commands():
         expand=True,
     )
 
-    table.add_column(
-        "Icon",
-        width=3,
-        style="bright_cyan",
-        no_wrap=True,
-    )
+    if terminal_is_compact():
+        table.add_column(
+            "Command",
+            width=12,
+            style="bold cyan",
+            no_wrap=True,
+        )
 
-    table.add_column(
-        "Command",
-        width=14,
-        style="bold cyan",
-        no_wrap=True,
-    )
+        table.add_column(
+            "Description",
+            style="white",
+            overflow="fold",
+        )
+    else:
+        table.add_column(
+            "Command",
+            width=18,
+            style="bold cyan",
+            no_wrap=True,
+        )
 
-    table.add_column(
-        "Description",
-        style="white",
-    )
+        table.add_column(
+            "Description",
+            style="white",
+            ratio=4,
+            overflow="fold",
+        )
 
-    commands = [
-        (
-            "◆",
-            "version",
-            "Show the installed AEGIS / ARGUS version.",
-        ),
-        (
-            "ⓘ",
-            "info",
-            "Show platform capabilities and lifecycle states.",
-        ),
-        (
-            ">",
-            "commands",
-            "Show common commands and practical examples.",
-        ),
-        (
-            "+",
-            "init",
-            "Create a new assessment campaign.",
-        ),
-        (
-            "◎",
-            "scope",
-            "Manage the authorized assessment scope.",
-        ),
-        (
-            "◇",
-            "plugin",
-            "List and execute reconnaissance plugins.",
-        ),
-        (
-            "▣",
-            "assets",
-            "Inspect discovered assets, graphs and lifecycle history.",
-        ),
-        (
-            "⌘",
-            "relations",
-            "Inspect relationships between discovered assets.",
-        ),
-        (
-            "∆",
-            "changes",
-            "Inspect asset and relation lifecycle changes.",
-        ),
-        (
-            "▤",
-            "results",
-            "Inspect and verify persisted plugin results.",
-        ),
-    ]
-
-    for (
-        icon,
-        command,
-        description,
-    ) in commands:
+    for command, description in commands:
         table.add_row(
-            icon,
             command,
             description,
         )
@@ -202,7 +292,6 @@ def print_root_commands():
             padding=(0, 0),
         )
     )
-
 
 def print_root_tip():
     console.print(
@@ -744,6 +833,7 @@ def print_plugin_table(
 # ---------------------------------------------------------
 
 
+
 def print_assets_table(
     assets: Iterable[Any],
 ):
@@ -763,52 +853,88 @@ def print_assets_table(
         expand=True,
     )
 
-    table.add_column(
-        "Type",
-        width=14,
-    )
-
-    table.add_column(
-        "Value",
-        style="bold white",
-    )
-
-    table.add_column(
-        "Source",
-        width=14,
-    )
-
-    table.add_column(
-        "State",
-        width=12,
-    )
-
-    table.add_column(
-        "Seen",
-        justify="right",
-        width=8,
-    )
-
-    for asset in assets:
-        table.add_row(
-            asset.type.value.upper(),
-            asset.value,
-            asset.source,
-            active_state_text(
-                asset.active
-            ),
-            str(
-                asset.seen_count
-            ),
+    if terminal_is_compact():
+        table.add_column(
+            "Type",
+            width=12,
         )
+
+        table.add_column(
+            "Asset",
+            style="bold white",
+            overflow="fold",
+        )
+
+        table.add_column(
+            "State",
+            width=10,
+        )
+
+        for asset in assets:
+            detail = Text(
+                asset.value,
+                style="bold white",
+            )
+
+            detail.append(
+                f"\nsource={asset.source}  seen={asset.seen_count}",
+                style="dim",
+            )
+
+            table.add_row(
+                asset.type.value.upper(),
+                detail,
+                active_state_text(
+                    asset.active
+                ),
+            )
+    else:
+        table.add_column(
+            "Type",
+            width=14,
+        )
+
+        table.add_column(
+            "Value",
+            style="bold white",
+        )
+
+        table.add_column(
+            "Source",
+            width=14,
+        )
+
+        table.add_column(
+            "State",
+            width=12,
+        )
+
+        table.add_column(
+            "Seen",
+            justify="right",
+            width=8,
+        )
+
+        for asset in assets:
+            table.add_row(
+                asset.type.value.upper(),
+                asset.value,
+                asset.source,
+                active_state_text(
+                    asset.active
+                ),
+                str(
+                    asset.seen_count
+                ),
+            )
 
     console.print()
     console.print(table)
 
-
 # ---------------------------------------------------------
 # RELATIONS
 # ---------------------------------------------------------
+
 
 
 def print_relations_table(
@@ -830,61 +956,103 @@ def print_relations_table(
         expand=True,
     )
 
-    table.add_column(
-        "Source",
-    )
-
-    table.add_column(
-        "Relation",
-        justify="center",
-        style="cyan",
-    )
-
-    table.add_column(
-        "Target",
-    )
-
-    table.add_column(
-        "State",
-        width=12,
-    )
-
-    table.add_column(
-        "Seen",
-        justify="right",
-        width=8,
-    )
-
-    for relation in relations:
-        source = (
-            f"{relation.source_type.value.upper()} "
-            f"{relation.source_value}"
+    if terminal_is_compact():
+        table.add_column(
+            "Relation",
+            overflow="fold",
         )
 
-        relation_name = (
-            f"--{relation.relation.value}-->"
+        table.add_column(
+            "State",
+            width=10,
         )
 
-        target = (
-            f"{relation.target_type.value.upper()} "
-            f"{relation.target_value}"
+        for relation in relations:
+            detail = Text()
+
+            detail.append(
+                f"{relation.source_type.value.upper()} "
+                f"{relation.source_value}",
+                style="white",
+            )
+
+            detail.append(
+                f"\n--{relation.relation.value}--> ",
+                style="cyan",
+            )
+
+            detail.append(
+                f"{relation.target_type.value.upper()} "
+                f"{relation.target_value}",
+                style="white",
+            )
+
+            detail.append(
+                f"\nseen={relation.seen_count}",
+                style="dim",
+            )
+
+            table.add_row(
+                detail,
+                active_state_text(
+                    relation.active
+                ),
+            )
+    else:
+        table.add_column(
+            "Source",
         )
 
-        table.add_row(
-            source,
-            relation_name,
-            target,
-            active_state_text(
-                relation.active
-            ),
-            str(
-                relation.seen_count
-            ),
+        table.add_column(
+            "Relation",
+            justify="center",
+            style="cyan",
         )
+
+        table.add_column(
+            "Target",
+        )
+
+        table.add_column(
+            "State",
+            width=12,
+        )
+
+        table.add_column(
+            "Seen",
+            justify="right",
+            width=8,
+        )
+
+        for relation in relations:
+            source = (
+                f"{relation.source_type.value.upper()} "
+                f"{relation.source_value}"
+            )
+
+            relation_name = (
+                f"--{relation.relation.value}-->"
+            )
+
+            target = (
+                f"{relation.target_type.value.upper()} "
+                f"{relation.target_value}"
+            )
+
+            table.add_row(
+                source,
+                relation_name,
+                target,
+                active_state_text(
+                    relation.active
+                ),
+                str(
+                    relation.seen_count
+                ),
+            )
 
     console.print()
     console.print(table)
-
 
 # ---------------------------------------------------------
 # CHANGES
@@ -930,6 +1098,7 @@ def change_object_text(
     return "Unknown"
 
 
+
 def print_changes_table(
     changes: Iterable[Any],
 ):
@@ -949,40 +1118,71 @@ def print_changes_table(
         expand=True,
     )
 
-    table.add_column(
-        "Detected",
-        width=27,
-    )
-
-    table.add_column(
-        "State",
-        width=20,
-    )
-
-    table.add_column(
-        "Object",
-    )
-
-    table.add_column(
-        "Plugin",
-        width=12,
-    )
-
-    for change in changes:
-        table.add_row(
-            change.detected_at.isoformat(),
-            lifecycle_text(
-                change.change_type
-            ),
-            change_object_text(
-                change
-            ),
-            change.plugin,
+    if terminal_is_compact():
+        table.add_column(
+            "State",
+            width=18,
         )
+
+        table.add_column(
+            "Change",
+            overflow="fold",
+        )
+
+        for change in changes:
+            detail = Text(
+                change_object_text(
+                    change
+                ),
+                style="white",
+            )
+
+            detail.append(
+                f"\nplugin={change.plugin}  "
+                f"detected={change.detected_at.isoformat()}",
+                style="dim",
+            )
+
+            table.add_row(
+                lifecycle_text(
+                    change.change_type
+                ),
+                detail,
+            )
+    else:
+        table.add_column(
+            "Detected",
+            width=27,
+        )
+
+        table.add_column(
+            "State",
+            width=20,
+        )
+
+        table.add_column(
+            "Object",
+        )
+
+        table.add_column(
+            "Plugin",
+            width=12,
+        )
+
+        for change in changes:
+            table.add_row(
+                change.detected_at.isoformat(),
+                lifecycle_text(
+                    change.change_type
+                ),
+                change_object_text(
+                    change
+                ),
+                change.plugin,
+            )
 
     console.print()
     console.print(table)
-
 
 # ---------------------------------------------------------
 # RESULTS
@@ -1834,37 +2034,83 @@ def _print_generic_observation(
 # ---------------------------------------------------------
 
 
+
 def print_commands_reference():
     sections = [
         (
             "CAMPAIGN",
             [
-                ("aegis init <name>", "Create a new assessment campaign."),
+                (
+                    "aegis init <name>",
+                    "Create a new assessment campaign.",
+                ),
+                (
+                    "aegis status",
+                    "Show campaign scope, exposure, changes and integrity.",
+                ),
+                (
+                    "aegis status --json",
+                    "Output campaign status as JSON.",
+                ),
             ],
         ),
         (
             "SCOPE",
             [
-                ("aegis scope add example.com", "Add an authorized target."),
-                ("aegis scope list", "List current scope targets."),
-                ("aegis scope remove example.com", "Remove a target from scope."),
+                (
+                    "aegis scope add example.com",
+                    "Add an authorized target.",
+                ),
+                (
+                    "aegis scope list",
+                    "List current scope targets.",
+                ),
+                (
+                    "aegis scope remove example.com",
+                    "Remove a target from scope.",
+                ),
             ],
         ),
         (
             "DISCOVERY",
             [
-                ("aegis plugin list", "List installed reconnaissance plugins."),
-                ("aegis plugin run dns", "Resolve in-scope domains."),
-                ("aegis plugin run service", "Discover exposed services."),
-                ("aegis plugin run tls", "Inspect TLS services and certificates."),
-                ("aegis plugin run http", "Probe HTTP endpoints."),
+                (
+                    "aegis plugin list",
+                    "List installed reconnaissance plugins.",
+                ),
+                (
+                    "aegis plugin run dns",
+                    "Resolve in-scope domains.",
+                ),
+                (
+                    "aegis plugin run service",
+                    "Discover exposed services.",
+                ),
+                (
+                    "aegis plugin run tls",
+                    "Inspect TLS services and certificates.",
+                ),
+                (
+                    "aegis plugin run http",
+                    "Probe HTTP endpoints.",
+                ),
             ],
         ),
         (
             "ASSETS",
             [
-                ("aegis assets list", "List discovered assets."),
-                ("aegis assets list --type service", "Filter assets by type."),
+                (
+                    "aegis assets list",
+                    "List discovered assets.",
+                ),
+                (
+                    "aegis assets list --type service",
+                    "Filter assets by type.",
+                ),
+                (
+                    "aegis assets show <filename>",
+                    "Inspect a persisted asset record.",
+                ),
                 (
                     "aegis assets history service example.com:443",
                     "Show lifecycle history for an asset.",
@@ -1882,7 +2128,14 @@ def print_commands_reference():
         (
             "RELATIONS",
             [
-                ("aegis relations list", "List discovered relations."),
+                (
+                    "aegis relations list",
+                    "List discovered relations.",
+                ),
+                (
+                    "aegis relations show <filename>",
+                    "Inspect a persisted relation record.",
+                ),
                 (
                     "aegis relations from domain example.com",
                     "List relations originating from an asset.",
@@ -1892,7 +2145,8 @@ def print_commands_reference():
                     "List relations pointing to an asset.",
                 ),
                 (
-                    "aegis relations history domain example.com resolves_to ip 104.20.23.154",
+                    "aegis relations history domain example.com "
+                    "resolves_to ip 104.20.23.154",
                     "Show relation lifecycle history.",
                 ),
             ],
@@ -1900,38 +2154,73 @@ def print_commands_reference():
         (
             "CHANGES",
             [
-                ("aegis changes list", "List detected lifecycle changes."),
-                ("aegis changes list --type inactive", "Show inactive transitions."),
+                (
+                    "aegis changes list",
+                    "List detected lifecycle changes.",
+                ),
+                (
+                    "aegis changes list --json",
+                    "Output lifecycle changes as JSON.",
+                ),
+                (
+                    "aegis changes list --type inactive",
+                    "Show inactive transitions.",
+                ),
                 (
                     "aegis changes list --type reactivated",
                     "Show reactivations.",
                 ),
-                ("aegis changes list --plugin dns", "Filter changes by plugin."),
+                (
+                    "aegis changes list --plugin dns",
+                    "Filter changes by plugin.",
+                ),
                 (
                     "aegis changes list --relation-type resolves_to",
                     "Filter relation changes.",
+                ),
+                (
+                    "aegis changes show <filename>",
+                    "Inspect a persisted change record.",
                 ),
             ],
         ),
         (
             "RESULTS & INTEGRITY",
             [
-                ("aegis results list", "List stored plugin results."),
-                ("aegis results show <filename>", "Inspect a stored result."),
+                (
+                    "aegis results list",
+                    "List stored plugin results.",
+                ),
+                (
+                    "aegis results show <filename>",
+                    "Inspect a stored result.",
+                ),
                 (
                     "aegis results verify <filename>",
                     "Verify SHA-256 integrity.",
                 ),
-                ("aegis results verify-all", "Verify all stored results."),
+                (
+                    "aegis results verify-all",
+                    "Verify all stored results.",
+                ),
+                (
+                    "aegis results baseline-legacy",
+                    "Create retrospective baselines for legacy results.",
+                ),
                 (
                     "aegis results integrity-summary",
                     "Show integrity manifest summary.",
+                ),
+                (
+                    "aegis results integrity-show <filename>",
+                    "Show an integrity manifest record.",
                 ),
             ],
         ),
     ]
 
     console.print()
+
     console.print(
         Panel(
             "[bold cyan]AEGIS[/bold cyan] / "
@@ -1942,18 +2231,67 @@ def print_commands_reference():
         )
     )
 
-    for title, items in sections:
-        table = Table(
-            box=box.SIMPLE,
-            show_header=False,
-            expand=True,
-            padding=(0, 1),
-        )
-        table.add_column("Command", style="bold cyan", ratio=2)
-        table.add_column("Description", style="white", ratio=3)
+    compact = terminal_is_compact()
 
-        for command, description in items:
-            table.add_row(command, description)
+    for title, items in sections:
+        if compact:
+            table = Table(
+                box=box.SIMPLE,
+                show_header=False,
+                expand=True,
+                padding=(0, 1),
+            )
+
+            table.add_column(
+                "Command",
+                overflow="fold",
+            )
+
+            for command, description in items:
+                cell = Text()
+                cell.append(
+                    command,
+                    style="bold cyan",
+                )
+                cell.append(
+                    "\n  ",
+                    style="dim",
+                )
+                cell.append(
+                    description,
+                    style="white",
+                )
+
+                table.add_row(
+                    cell
+                )
+        else:
+            table = Table(
+                box=box.SIMPLE,
+                show_header=False,
+                expand=True,
+                padding=(0, 1),
+            )
+
+            table.add_column(
+                "Command",
+                style="bold cyan",
+                ratio=3,
+                overflow="fold",
+            )
+
+            table.add_column(
+                "Description",
+                style="white",
+                ratio=2,
+                overflow="fold",
+            )
+
+            for command, description in items:
+                table.add_row(
+                    command,
+                    description,
+                )
 
         console.print(
             Panel(
@@ -1966,7 +2304,6 @@ def print_commands_reference():
         )
 
     print_root_tip()
-
 
 # ---------------------------------------------------------
 # DETAIL / HISTORY HELPERS
@@ -2717,3 +3054,435 @@ def print_relation_history(
         timeline,
         border_style="bright_black",
     )
+
+def print_status_dashboard(
+    *,
+    campaign_name: str,
+    scope_counts: dict[str, int],
+    active_assets: int,
+    inactive_assets: int,
+    active_relations: int,
+    inactive_relations: int,
+    changes_count: int,
+    results_count: int,
+    integrity_verification: dict[str, int],
+    integrity_baselines: dict[str, int],
+    recent_changes: list[Any],
+    latest_result: Any | None,
+):
+    console.print()
+
+    header = Text()
+
+    header.append(
+        "AEGIS",
+        style="bold cyan",
+    )
+
+    header.append(
+        " / ",
+        style="dim",
+    )
+
+    header.append(
+        "ARGUS",
+        style="bold magenta",
+    )
+
+    header.append(
+        "\nAssessment status",
+        style="bold white",
+    )
+
+    console.print(
+        Panel(
+            header,
+            border_style="cyan",
+            box=box.ROUNDED,
+        )
+    )
+
+    # -------------------------------------------------
+    # CAMPAIGN
+    # -------------------------------------------------
+
+    campaign = Table(
+        show_header=False,
+        box=box.ROUNDED,
+        border_style="bright_black",
+        expand=True,
+    )
+
+    campaign.add_column(
+        "Field",
+        style="dim",
+    )
+
+    campaign.add_column(
+        "Value",
+        style="bold white",
+    )
+
+    campaign.add_row(
+        "Campaign",
+        campaign_name,
+    )
+
+    campaign.add_row(
+        "Results",
+        str(results_count),
+    )
+
+    campaign.add_row(
+        "Changes",
+        str(changes_count),
+    )
+
+    console.print(
+        Panel(
+            campaign,
+            title="[bold cyan] CAMPAIGN [/bold cyan]",
+            title_align="left",
+            border_style="cyan",
+            box=box.ROUNDED,
+        )
+    )
+
+    # -------------------------------------------------
+    # SCOPE
+    # -------------------------------------------------
+
+    scope = Table(
+        box=box.SIMPLE,
+        show_header=True,
+        header_style="bold cyan",
+        expand=True,
+    )
+
+    scope.add_column(
+        "Type",
+    )
+
+    scope.add_column(
+        "Count",
+        justify="right",
+    )
+
+    for (
+        target_type,
+        count,
+    ) in sorted(
+        scope_counts.items()
+    ):
+        scope.add_row(
+            target_type.upper(),
+            str(count),
+        )
+
+    console.print(
+        Panel(
+            scope,
+            title="[bold cyan] SCOPE [/bold cyan]",
+            title_align="left",
+            border_style="cyan",
+            box=box.ROUNDED,
+        )
+    )
+
+    # -------------------------------------------------
+    # EXPOSURE
+    # -------------------------------------------------
+
+    exposure = Table(
+        box=box.ROUNDED,
+        show_header=True,
+        header_style="bold magenta",
+        expand=True,
+    )
+
+    exposure.add_column(
+        "Object",
+    )
+
+    exposure.add_column(
+        "Active",
+        justify="right",
+    )
+
+    exposure.add_column(
+        "Inactive",
+        justify="right",
+    )
+
+    exposure.add_row(
+        "Assets",
+        Text(
+            str(active_assets),
+            style="bold green",
+        ),
+        Text(
+            str(inactive_assets),
+            style="bold red",
+        ),
+    )
+
+    exposure.add_row(
+        "Relations",
+        Text(
+            str(active_relations),
+            style="bold green",
+        ),
+        Text(
+            str(inactive_relations),
+            style="bold red",
+        ),
+    )
+
+    console.print(
+        Panel(
+            exposure,
+            title="[bold magenta] EXPOSURE [/bold magenta]",
+            title_align="left",
+            border_style="magenta",
+            box=box.ROUNDED,
+        )
+    )
+
+     # -------------------------------------------------
+    # INTEGRITY
+    # -------------------------------------------------
+
+    verification = Table(
+        box=box.SIMPLE,
+        show_header=False,
+        expand=True,
+    )
+
+    verification.add_column(
+        "Status",
+    )
+
+    verification.add_column(
+        "Count",
+        justify="right",
+    )
+
+    for status in [
+        "OK",
+        "FAILED",
+        "UNKNOWN",
+        "CONFLICT",
+    ]:
+        verification.add_row(
+            integrity_status_text(
+                status
+            ),
+            str(
+                integrity_verification.get(
+                    status,
+                    0,
+                )
+            ),
+        )
+
+    console.print(
+        Panel(
+            verification,
+            title=(
+                "[bold cyan] "
+                "INTEGRITY / VERIFICATION "
+                "[/bold cyan]"
+            ),
+            title_align="left",
+            border_style="cyan",
+            box=box.ROUNDED,
+        )
+    )
+
+    baselines = Table(
+        box=box.SIMPLE,
+        show_header=False,
+        expand=True,
+    )
+
+    baselines.add_column(
+        "Baseline",
+    )
+
+    baselines.add_column(
+        "Count",
+        justify="right",
+    )
+
+    baselines.add_row(
+        Text(
+            "ORIGINAL",
+            style="bold green",
+        ),
+        str(
+            integrity_baselines.get(
+                "ORIGINAL",
+                0,
+            )
+        ),
+    )
+
+    baselines.add_row(
+        Text(
+            "RETROSPECTIVE",
+            style="bold yellow",
+        ),
+        str(
+            integrity_baselines.get(
+                "RETROSPECTIVE",
+                0,
+            )
+        ),
+    )
+
+    console.print(
+        Panel(
+            baselines,
+            title=(
+                "[bold magenta] "
+                "INTEGRITY / BASELINES "
+                "[/bold magenta]"
+            ),
+            title_align="left",
+            border_style="magenta",
+            box=box.ROUNDED,
+        )
+    )
+
+    # -------------------------------------------------
+    # RECENT CHANGES
+    # -------------------------------------------------
+
+    if recent_changes:
+        changes_table = Table(
+            box=box.SIMPLE,
+            show_header=True,
+            header_style="bold yellow",
+            expand=True,
+        )
+
+        if terminal_is_compact():
+            changes_table.add_column(
+                "State",
+                width=18,
+            )
+
+            changes_table.add_column(
+                "Change",
+                overflow="fold",
+            )
+
+            for change in recent_changes:
+                detail = Text(
+                    change_object_text(
+                        change
+                    ),
+                    style="white",
+                )
+
+                detail.append(
+                    f"\nplugin={change.plugin}",
+                    style="dim",
+                )
+
+                changes_table.add_row(
+                    lifecycle_text(
+                        change.change_type
+                    ),
+                    detail,
+                )
+        else:
+            changes_table.add_column(
+                "State",
+                width=20,
+            )
+
+            changes_table.add_column(
+                "Object",
+            )
+
+            changes_table.add_column(
+                "Plugin",
+                width=12,
+            )
+
+            for change in recent_changes:
+                changes_table.add_row(
+                    lifecycle_text(
+                        change.change_type
+                    ),
+                    change_object_text(
+                        change
+                    ),
+                    change.plugin,
+                )
+
+        console.print(
+            Panel(
+                changes_table,
+                title="[bold yellow] RECENT CHANGES [/bold yellow]",
+                title_align="left",
+                border_style="yellow",
+                box=box.ROUNDED,
+            )
+        )
+
+    # -------------------------------------------------
+    # LATEST RESULT
+    # -------------------------------------------------
+
+    if latest_result is not None:
+        path, result = latest_result
+
+        latest = Table(
+            show_header=False,
+            box=box.SIMPLE,
+            expand=True,
+        )
+
+        latest.add_column(
+            "Field",
+            style="dim",
+        )
+
+        latest.add_column(
+            "Value",
+            style="white",
+        )
+
+        latest.add_row(
+            "Plugin",
+            result.plugin,
+        )
+
+        latest.add_row(
+            "Version",
+            result.version,
+        )
+
+        latest.add_row(
+            "Timestamp",
+            str(
+                result.timestamp
+            ),
+        )
+
+        latest.add_row(
+            "Result",
+            path.name,
+        )
+
+        console.print(
+            Panel(
+                latest,
+                title="[bold magenta] LATEST EXECUTION [/bold magenta]",
+                title_align="left",
+                border_style="magenta",
+                box=box.ROUNDED,
+            )
+        )

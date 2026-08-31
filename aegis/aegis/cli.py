@@ -44,6 +44,9 @@ from aegis.cli_ui import (
     print_success,
     print_version,
     print_warning,
+    print_status_dashboard,
+    print_commands_reference,
+    set_compact_mode,
 )
 
 AEGIS_VERSION = "0.1.0"
@@ -137,13 +140,28 @@ app.add_typer(
     name="results",
 )
 
+
 @app.callback(
     invoke_without_command=True,
 )
 def main(
     ctx: typer.Context,
+    compact: bool = typer.Option(
+        False,
+        "--compact",
+        help=(
+            "Force compact terminal layout. "
+            "Without this option AEGIS adapts automatically."
+        ),
+    ),
 ):
     """AEGIS / ARGUS command-line interface."""
+
+    set_compact_mode(
+        True
+        if compact
+        else None
+    )
 
     if ctx.invoked_subcommand is None:
         print_root_interface()
@@ -166,315 +184,364 @@ def info():
 def commands():
     """Show common AEGIS / ARGUS commands and examples."""
 
-    typer.echo("AEGIS / ARGUS")
-    typer.echo("")
-    typer.echo("Common commands")
-    typer.echo("")
+    print_commands_reference()
 
-    # ---------------------------------------------
+@app.command()
+def status(
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Output campaign status as JSON.",
+    ),
+):
+    """Show an operational overview of the current campaign."""
+
+    campaign = find_campaign()
+
+    if campaign is None:
+        print_error(
+            "no AEGIS / ARGUS campaign found."
+        )
+        raise typer.Exit(code=1)
+
+    context = AssessmentContext(
+        campaign
+    )
+
+    # -------------------------------------------------
     # CAMPAIGN
-    # ---------------------------------------------
+    # -------------------------------------------------
 
-    typer.echo("Campaign")
-    typer.echo("")
-
-    typer.echo(
-        "  aegis init <name>"
+    campaign_name = (
+        campaign.root.name
+        if hasattr(
+            campaign,
+            "root",
+        )
+        else Path.cwd().name
     )
 
-    typer.echo(
-        "      Create a new assessment campaign."
-    )
-
-    typer.echo("")
-
-    # ---------------------------------------------
+    # -------------------------------------------------
     # SCOPE
-    # ---------------------------------------------
+    # -------------------------------------------------
 
-    typer.echo("Scope")
-    typer.echo("")
+    scope_counts: dict[
+        str,
+        int,
+    ] = {}
 
-    typer.echo(
-        "  aegis scope add example.com"
-    )
+    for target in context.scope.list():
+        key = target.type.value
 
-    typer.echo(
-        "      Add a domain, IP, URL or supported "
-        "target to scope."
-    )
+        scope_counts[key] = (
+            scope_counts.get(
+                key,
+                0,
+            )
+            + 1
+        )
 
-    typer.echo(
-        "  aegis scope list"
-    )
-
-    typer.echo(
-        "      List current scope targets."
-    )
-
-    typer.echo(
-        "  aegis scope remove example.com"
-    )
-
-    typer.echo(
-        "      Remove a target from scope."
-    )
-
-    typer.echo("")
-
-    # ---------------------------------------------
-    # PLUGINS
-    # ---------------------------------------------
-
-    typer.echo("Discovery")
-    typer.echo("")
-
-    typer.echo(
-        "  aegis plugin list"
-    )
-
-    typer.echo(
-        "      List installed reconnaissance plugins."
-    )
-
-    typer.echo(
-        "  aegis plugin run dns"
-    )
-
-    typer.echo(
-        "      Resolve in-scope domains."
-    )
-
-    typer.echo(
-        "  aegis plugin run service"
-    )
-
-    typer.echo(
-        "      Discover exposed services."
-    )
-
-    typer.echo(
-        "  aegis plugin run tls"
-    )
-
-    typer.echo(
-        "      Inspect TLS services and certificates."
-    )
-
-    typer.echo(
-        "  aegis plugin run http"
-    )
-
-    typer.echo(
-        "      Probe HTTP endpoints."
-    )
-
-    typer.echo("")
-
-    # ---------------------------------------------
+    # -------------------------------------------------
     # ASSETS
-    # ---------------------------------------------
+    # -------------------------------------------------
 
-    typer.echo("Assets")
-    typer.echo("")
+    assets = context.assets.find()
 
-    typer.echo(
-        "  aegis assets list"
+    active_assets = sum(
+        1
+        for asset in assets
+        if asset.active
     )
 
-    typer.echo(
-        "      List discovered assets."
+    inactive_assets = (
+        len(assets)
+        - active_assets
     )
 
-    typer.echo(
-        "  aegis assets list --type service"
-    )
-
-    typer.echo(
-        "      Filter assets by type."
-    )
-
-    typer.echo(
-        "  aegis assets history "
-        "service example.com:443"
-    )
-
-    typer.echo(
-        "      Show lifecycle history for an asset."
-    )
-
-    typer.echo(
-        "  aegis assets related "
-        "domain example.com"
-    )
-
-    typer.echo(
-        "      Show incoming and outgoing relations."
-    )
-
-    typer.echo(
-        "  aegis assets graph "
-        "example.com --type domain"
-    )
-
-    typer.echo(
-        "      Walk the asset relation graph."
-    )
-
-    typer.echo("")
-
-    # ---------------------------------------------
+    # -------------------------------------------------
     # RELATIONS
-    # ---------------------------------------------
+    # -------------------------------------------------
 
-    typer.echo("Relations")
-    typer.echo("")
-
-    typer.echo(
-        "  aegis relations list"
+    relations = (
+        context.relations.find()
     )
 
-    typer.echo(
-        "      List discovered relations."
+    active_relations = sum(
+        1
+        for relation in relations
+        if relation.active
     )
 
-    typer.echo(
-        "  aegis relations from "
-        "domain example.com"
+    inactive_relations = (
+        len(relations)
+        - active_relations
     )
 
-    typer.echo(
-        "      List relations originating "
-        "from an asset."
-    )
-
-    typer.echo(
-        "  aegis relations to "
-        "service example.com:443"
-    )
-
-    typer.echo(
-        "      List relations pointing "
-        "to an asset."
-    )
-
-    typer.echo(
-        "  aegis relations history "
-        "domain example.com "
-        "resolves_to ip 104.20.23.154"
-    )
-
-    typer.echo(
-        "      Show relation lifecycle history."
-    )
-
-    typer.echo("")
-
-    # ---------------------------------------------
+    # -------------------------------------------------
     # CHANGES
-    # ---------------------------------------------
+    # -------------------------------------------------
 
-    typer.echo("Changes")
-    typer.echo("")
-
-    typer.echo(
-        "  aegis changes list"
+    changes = (
+        context.changes.find()
     )
 
-    typer.echo(
-        "      List detected lifecycle changes."
+    changes.sort(
+        key=lambda change: (
+            change.detected_at
+        ),
+        reverse=True,
     )
 
-    typer.echo(
-        "  aegis changes list "
-        "--type inactive"
+    recent_changes = (
+        changes[:5]
     )
 
-    typer.echo(
-        "      Show inactive transitions."
-    )
-
-    typer.echo(
-        "  aegis changes list "
-        "--type reactivated"
-    )
-
-    typer.echo(
-        "      Show reactivations."
-    )
-
-    typer.echo(
-        "  aegis changes list "
-        "--plugin dns"
-    )
-
-    typer.echo(
-        "      Filter changes by plugin."
-    )
-
-    typer.echo(
-        "  aegis changes list "
-        "--relation-type resolves_to"
-    )
-
-    typer.echo(
-        "      Filter relation changes."
-    )
-
-    typer.echo("")
-
-    # ---------------------------------------------
+    # -------------------------------------------------
     # RESULTS
-    # ---------------------------------------------
+    # -------------------------------------------------
 
-    typer.echo("Results & integrity")
-    typer.echo("")
-
-    typer.echo(
-        "  aegis results list"
+    result_paths = (
+        context.results.list()
     )
 
-    typer.echo(
-        "      List stored plugin results."
-    )
+    latest_result = None
 
-    typer.echo(
-        "  aegis results show <filename>"
-    )
+    if result_paths:
+        latest_path = max(
+            result_paths,
+            key=lambda path: (
+                path.stat().st_mtime
+            ),
+        )
 
-    typer.echo(
-        "      Inspect a stored result."
-    )
+        try:
+            latest = (
+                context.results.load(
+                    latest_path
+                )
+            )
 
-    typer.echo(
-        "  aegis results verify <filename>"
-    )
+            latest_result = (
+                latest_path,
+                latest,
+            )
 
-    typer.echo(
-        "      Verify SHA-256 integrity."
-    )
+        except Exception:
+            latest_result = None
 
-    typer.echo(
-        "  aegis results verify-all"
-    )
 
-    typer.echo(
-        "      Verify all stored results."
-    )
+    # -------------------------------------------------
+    # INTEGRITY
+    # -------------------------------------------------
 
-    typer.echo(
-        "  aegis results integrity-summary"
-    )
+    integrity_verification = {
+        "OK": 0,
+        "FAILED": 0,
+        "UNKNOWN": 0,
+        "CONFLICT": 0,
+    }
 
-    typer.echo(
-        "      Show integrity manifest summary."
-    )
+    integrity_baselines = {
+        "ORIGINAL": 0,
+        "RETROSPECTIVE": 0,
+    }
 
-    typer.echo("")
+    for path in result_paths:
+        record = (
+            context.integrity.get(
+                path.name
+            )
+        )
 
-    typer.echo(
-        "Use 'aegis <command> --help' "
-        "for command-specific help."
+        status_value, _, _ = (
+            verify_result_file(
+                path,
+                assets,
+                integrity_record=record,
+            )
+        )
+
+        # -----------------------------------------
+        # Verification state
+        # -----------------------------------------
+
+        if status_value in {
+            "OK",
+            "BASELINED",
+        }:
+            integrity_verification[
+                "OK"
+            ] += 1
+
+        elif status_value in {
+            "FAILED",
+            "UNKNOWN",
+            "CONFLICT",
+        }:
+            integrity_verification[
+                status_value
+            ] += 1
+
+        # -----------------------------------------
+        # Baseline type
+        # -----------------------------------------
+
+        if record is not None:
+            baseline_type = (
+                record.baseline_type.value.upper()
+            )
+
+            if baseline_type in (
+                integrity_baselines
+            ):
+                integrity_baselines[
+                    baseline_type
+                ] += 1
+
+    # -------------------------------------------------
+    # JSON
+    # -------------------------------------------------
+
+    if json_output:
+        payload = {
+            "campaign": (
+                campaign_name
+            ),
+            "scope": (
+                scope_counts
+            ),
+            "assets": {
+                "total": len(
+                    assets
+                ),
+                "active": (
+                    active_assets
+                ),
+                "inactive": (
+                    inactive_assets
+                ),
+            },
+            "relations": {
+                "total": len(
+                    relations
+                ),
+                "active": (
+                    active_relations
+                ),
+                "inactive": (
+                    inactive_relations
+                ),
+            },
+            "changes": {
+                "total": len(
+                    changes
+                ),
+                "recent": [
+                    {
+                        "change_type": (
+                            change.change_type.value
+                        ),
+                        "plugin": (
+                            change.plugin
+                        ),
+                    }
+                    for change
+                    in recent_changes
+                ],
+            },
+            "results": {
+                "total": len(
+                    result_paths
+                ),
+            },
+            "integrity": {
+                "verification": (
+                    integrity_verification
+                ),
+                "baselines": (
+                    integrity_baselines
+                ),
+            },
+        }
+
+        if latest_result is not None:
+            (
+                latest_path,
+                latest,
+            ) = latest_result
+
+            payload[
+                "latest_result"
+            ] = {
+                "filename": (
+                    latest_path.name
+                ),
+                "plugin": (
+                    latest.plugin
+                ),
+                "version": (
+                    latest.version
+                ),
+                "timestamp": (
+                    latest.timestamp.isoformat()
+                ),
+            }
+
+        else:
+            payload[
+                "latest_result"
+            ] = None
+
+        typer.echo(
+            json.dumps(
+                payload,
+                indent=2,
+            )
+        )
+
+        return
+
+    # -------------------------------------------------
+    # HUMAN OUTPUT
+    # -------------------------------------------------
+
+    print_status_dashboard(
+        campaign_name=(
+            campaign_name
+        ),
+        scope_counts=(
+            scope_counts
+        ),
+        active_assets=(
+            active_assets
+        ),
+        inactive_assets=(
+            inactive_assets
+        ),
+        active_relations=(
+            active_relations
+        ),
+        inactive_relations=(
+            inactive_relations
+        ),
+        changes_count=(
+            len(changes)
+        ),
+        results_count=(
+            len(result_paths)
+        ),
+        integrity_verification=(
+            integrity_verification
+        ),
+        integrity_baselines=(
+            integrity_baselines
+        ),
+        recent_changes=(
+            recent_changes
+        ),
+        latest_result=(
+            latest_result
+        ),
     )
 
 @app.command()

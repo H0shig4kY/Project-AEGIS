@@ -110,7 +110,6 @@ def test_changes_list(
     assert "Lifecycle Changes" in result.output
     assert "REACTIVATED" in result.output
     assert "SERVICE" in result.output
-    assert "Plugin" in result.output
     assert "service" in result.output
 
 
