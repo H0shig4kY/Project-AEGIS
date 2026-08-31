@@ -1,11 +1,15 @@
 from pathlib import Path
 from typing import Any, Iterable
 
+import shutil
+
 from rich import box
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+from rich.console import Group
+from rich.rule import Rule
 
 from aegis.models import ChangeType
 
@@ -40,17 +44,14 @@ def terminal_width() -> int:
 
     return console.size.width
 
+def terminal_is_compact(
+    threshold: int = 110,
+) -> bool:
+    width = shutil.get_terminal_size(
+        fallback=(120, 30)
+    ).columns
 
-def terminal_is_compact() -> bool:
-    """Return True when the terminal should use compact layouts."""
-
-    if _layout_override is not None:
-        return _layout_override
-
-    return (
-        terminal_width()
-        < COMPACT_WIDTH
-    )
+    return width < threshold
 
 
 def terminal_is_narrow() -> bool:
@@ -157,6 +158,236 @@ def print_banner():
 
     console.print()
 
+def print_wide_findings(
+    findings,
+):
+    findings_table = Table(
+        box=box.ROUNDED,
+        header_style="bold yellow",
+        expand=True,
+    )
+
+    findings_table.add_column(
+        "ID",
+        width=12,
+        no_wrap=True,
+    )
+
+    findings_table.add_column(
+        "Severity",
+        width=12,
+        no_wrap=True,
+    )
+
+    findings_table.add_column(
+        "Rule",
+        width=26,
+    )
+
+    findings_table.add_column(
+        "Asset",
+        ratio=2,
+    )
+
+    findings_table.add_column(
+        "Affected Service",
+        ratio=2,
+    )
+
+    findings_table.add_column(
+        "Description",
+        ratio=3,
+    )
+
+    severity_styles = {
+        "info": "bold cyan",
+        "low": "bold green",
+        "medium": "bold yellow",
+        "high": "bold red",
+        "critical": "bold white on red",
+    }
+
+    for finding in findings:
+        severity = (
+            finding.severity.value
+        )
+
+        severity_text = Text(
+            severity.upper(),
+            style=severity_styles.get(
+                severity,
+                "white",
+            ),
+        )
+
+        asset_text = (
+            f"{finding.asset_type.value.upper()} "
+            f"{finding.asset_value}"
+        )
+
+        affected_service = (
+            finding.affected_service
+            or "-"
+        )
+
+        findings_table.add_row(
+            finding.finding_id[:12],
+            severity_text,
+            finding.rule_id,
+            asset_text,
+            affected_service,
+            finding.description,
+        )
+
+    console.print(
+        Panel(
+            findings_table,
+            title=(
+                "[bold yellow] "
+                "FINDINGS "
+                "[/bold yellow]"
+            ),
+            title_align="left",
+            border_style="yellow",
+            box=box.ROUNDED,
+        )
+    )
+
+def print_compact_findings(
+    findings,
+):
+    content = Table(
+        box=None,
+        show_header=False,
+        expand=True,
+        padding=(0, 1),
+    )
+
+    content.add_column(
+        "Finding",
+        ratio=1,
+    )
+
+    severity_styles = {
+        "info": "bold cyan",
+        "low": "bold green",
+        "medium": "bold yellow",
+        "high": "bold red",
+        "critical": "bold white on red",
+    }
+
+    for index, finding in enumerate(
+        findings
+    ):
+        severity = (
+            finding.severity.value
+        )
+
+        severity_text = Text()
+
+        severity_text.append(
+            severity.upper(),
+            style=severity_styles.get(
+                severity,
+                "bold white",
+            ),
+        )
+
+        severity_text.append(
+            "  "
+        )
+
+        severity_text.append(
+            finding.rule_id,
+            style="bold",
+        )
+
+        body = Text()
+
+        body.append(
+            "ID: ",
+            style="bold cyan",
+        )
+
+        body.append(
+            finding.finding_id[:12]
+        )
+
+        body.append("\n")
+
+        body.append(
+            "Asset: ",
+            style="bold cyan",
+        )
+
+        body.append(
+            f"{finding.asset_type.value.upper()} "
+            f"{finding.asset_value}"
+        )
+
+        body.append("\n")
+
+        body.append(
+            "Service: ",
+            style="bold cyan",
+        )
+
+        body.append(
+            finding.affected_service
+            or "-"
+        )
+
+        body.append("\n")
+
+        body.append(
+            "Plugin: ",
+            style="bold cyan",
+        )
+
+        body.append(
+            finding.plugin
+            or "-"
+        )
+
+        body.append("\n\n")
+
+        body.append(
+            finding.description
+        )
+
+        finding_block = Group(
+            severity_text,
+            body,
+        )
+
+        content.add_row(
+            finding_block
+        )
+
+        if (
+            index
+            < len(findings) - 1
+        ):
+            content.add_row(
+                Rule(
+                    style="bright_black"
+                )
+            )
+
+    console.print(
+        Panel(
+            content,
+            title=(
+                "[bold yellow] "
+                "FINDINGS "
+                "[/bold yellow]"
+            ),
+            title_align="left",
+            border_style="yellow",
+            box=box.ROUNDED,
+        )
+    )
+
 def print_root_usage():
     usage = Text()
 
@@ -209,6 +440,10 @@ def print_root_commands():
         (
             "exposure",
             "Show the current assessed exposure surface.",
+        ),
+        (
+            "findings",
+            "Inspect current exposure findings.",
         ),
         (
             "commands",
@@ -2072,6 +2307,35 @@ def print_commands_reference():
             ],
         ),
         (
+            "FINDINGS",
+            [
+                (
+                    "aegis findings list",
+                    "List current exposure findings.",
+                ),
+                (
+                    "aegis findings list --severity high",
+                    "Filter findings by severity.",
+                ),
+                (
+                    "aegis findings list --rule TLS_CERTIFICATE_EXPIRED",
+                    "Filter findings by rule.",
+                ),
+                (
+                    "aegis findings list --asset-type service",
+                    "Filter findings by asset type.",
+                ),
+                (
+                    "aegis findings list --json",
+                    "Output current findings as JSON.",
+                ),
+                (
+                    "aegis findings show <id>",
+                    "Show detailed information about a finding.",
+                ),
+            ],
+        ),
+        (
             "SCOPE",
             [
                 (
@@ -3506,12 +3770,17 @@ def print_status_dashboard(
 
 def print_exposure_dashboard(
     *,
-    asset_counts: dict[str, dict[str, int]],
-    services: list[Any],
-    tls_relations: list[Any],
-    recent_changes: list[Any],
+    asset_counts,
+    services,
+    tls_relations,
+    recent_changes,
+    findings,
 ):
     console.print()
+
+    # -------------------------------------------------
+    # HEADER
+    # -------------------------------------------------
 
     console.print(
         Panel(
@@ -3523,15 +3792,29 @@ def print_exposure_dashboard(
         )
     )
 
+    # -------------------------------------------------
+    # EXPOSURE SUMMARY
+    # -------------------------------------------------
+
     summary = Table(
         box=box.ROUNDED,
         header_style="bold cyan",
         expand=True,
     )
 
-    summary.add_column("Type")
-    summary.add_column("Active", justify="right")
-    summary.add_column("Inactive", justify="right")
+    summary.add_column(
+        "Type",
+    )
+
+    summary.add_column(
+        "Active",
+        justify="right",
+    )
+
+    summary.add_column(
+        "Inactive",
+        justify="right",
+    )
 
     for asset_type, counts in sorted(
         asset_counts.items()
@@ -3555,12 +3838,20 @@ def print_exposure_dashboard(
     console.print(
         Panel(
             summary,
-            title="[bold cyan] EXPOSURE SUMMARY [/bold cyan]",
+            title=(
+                "[bold cyan] "
+                "EXPOSURE SUMMARY "
+                "[/bold cyan]"
+            ),
             title_align="left",
             border_style="cyan",
             box=box.ROUNDED,
         )
     )
+
+    # -------------------------------------------------
+    # SERVICES
+    # -------------------------------------------------
 
     if services:
         service_table = Table(
@@ -3578,28 +3869,55 @@ def print_exposure_dashboard(
         )
 
         service_table.add_column(
+            "TLS",
+            width=8,
+        )
+
+        service_table.add_column(
             "State",
             width=12,
         )
 
-        for asset in services:
+        for service in services:
+            tls_text = Text(
+                (
+                    "YES"
+                    if service.tls
+                    else "NO"
+                ),
+                style=(
+                    "bold green"
+                    if service.tls
+                    else "bold yellow"
+                ),
+            )
+
             service_table.add_row(
-                asset.value,
-                asset.source,
+                service.value,
+                service.source or "-",
+                tls_text,
                 active_state_text(
-                    asset.active
+                    service.active
                 ),
             )
 
         console.print(
             Panel(
                 service_table,
-                title="[bold magenta] SERVICES [/bold magenta]",
+                title=(
+                    "[bold magenta] "
+                    "SERVICES "
+                    "[/bold magenta]"
+                ),
                 title_align="left",
                 border_style="magenta",
                 box=box.ROUNDED,
             )
         )
+
+    # -------------------------------------------------
+    # TLS EXPOSURE
+    # -------------------------------------------------
 
     if tls_relations:
         tls_table = Table(
@@ -3633,12 +3951,34 @@ def print_exposure_dashboard(
         console.print(
             Panel(
                 tls_table,
-                title="[bold magenta] TLS EXPOSURE [/bold magenta]",
+                title=(
+                    "[bold magenta] "
+                    "TLS EXPOSURE "
+                    "[/bold magenta]"
+                ),
                 title_align="left",
                 border_style="magenta",
                 box=box.ROUNDED,
             )
         )
+
+    # -------------------------------------------------
+    # FINDINGS
+    # -------------------------------------------------
+
+    if findings:
+        if terminal_is_compact():
+            print_compact_findings(
+                findings
+            )
+        else:
+            print_wide_findings(
+                findings
+            )
+
+    # -------------------------------------------------
+    # RECENT EXPOSURE CHANGES
+    # -------------------------------------------------
 
     if recent_changes:
         change_table = Table(
@@ -3675,9 +4015,226 @@ def print_exposure_dashboard(
         console.print(
             Panel(
                 change_table,
-                title="[bold yellow] RECENT EXPOSURE CHANGES [/bold yellow]",
+                title=(
+                    "[bold yellow] "
+                    "RECENT EXPOSURE CHANGES "
+                    "[/bold yellow]"
+                ),
                 title_align="left",
                 border_style="yellow",
                 box=box.ROUNDED,
             )
         )
+
+def print_findings_table(
+    findings,
+):
+    findings = list(
+        findings
+    )
+
+    if not findings:
+        print_empty(
+            "No findings found."
+        )
+        return
+
+    if terminal_is_compact():
+        print_compact_findings(
+            findings
+        )
+        return
+
+    findings_table = Table(
+        title="Exposure Findings",
+        box=box.ROUNDED,
+        border_style="yellow",
+        header_style="bold yellow",
+        expand=True,
+    )
+
+    findings_table.add_column(
+        "ID",
+        width=12,
+        no_wrap=True,
+    )
+
+    findings_table.add_column(
+        "Severity",
+        width=12,
+        no_wrap=True,
+    )
+
+    findings_table.add_column(
+        "Rule",
+        width=28,
+    )
+
+    findings_table.add_column(
+        "Asset",
+        ratio=2,
+    )
+
+    findings_table.add_column(
+        "Affected Service",
+        ratio=2,
+    )
+
+    findings_table.add_column(
+        "Plugin",
+        width=10,
+    )
+
+    severity_styles = {
+        "info": "bold cyan",
+        "low": "bold green",
+        "medium": "bold yellow",
+        "high": "bold red",
+        "critical": "bold white on red",
+    }
+
+    for finding in findings:
+        severity = (
+            finding.severity.value
+        )
+
+        findings_table.add_row(
+            finding.finding_id[:12],
+            Text(
+                severity.upper(),
+                style=severity_styles.get(
+                    severity,
+                    "white",
+                ),
+            ),
+            finding.rule_id,
+            (
+                f"{finding.asset_type.value.upper()} "
+                f"{finding.asset_value}"
+            ),
+            (
+                finding.affected_service
+                or "-"
+            ),
+            (
+                finding.plugin
+                or "-"
+            ),
+        )
+
+    console.print()
+    console.print(
+        findings_table
+    )
+
+def print_finding_detail(
+    finding,
+):
+    console.print()
+
+    severity = (
+        finding.severity.value
+    )
+
+    severity_styles = {
+        "info": "bold cyan",
+        "low": "bold green",
+        "medium": "bold yellow",
+        "high": "bold red",
+        "critical": "bold white on red",
+    }
+
+    table = Table(
+        box=None,
+        show_header=False,
+        expand=True,
+        padding=(0, 1),
+    )
+
+    table.add_column(
+        "Field",
+        style="bold cyan",
+        width=20,
+    )
+
+    table.add_column(
+        "Value",
+        overflow="fold",
+    )
+
+    table.add_row(
+        "ID",
+        finding.finding_id,
+    )
+
+    table.add_row(
+        "Short ID",
+        finding.finding_id[:12],
+    )
+
+    table.add_row(
+        "Severity",
+        Text(
+            severity.upper(),
+            style=severity_styles.get(
+                severity,
+                "white",
+            ),
+        ),
+    )
+
+    table.add_row(
+        "Rule",
+        finding.rule_id,
+    )
+
+    table.add_row(
+        "Title",
+        finding.title,
+    )
+
+    table.add_row(
+        "Asset Type",
+        finding.asset_type.value.upper(),
+    )
+
+    table.add_row(
+        "Asset",
+        finding.asset_value,
+    )
+
+    table.add_row(
+        "Affected Service",
+        finding.affected_service
+        or "-",
+    )
+
+    table.add_row(
+        "Plugin",
+        finding.plugin
+        or "-",
+    )
+
+    table.add_row(
+        "Description",
+        finding.description,
+    )
+
+    console.print(
+        Panel(
+            table,
+            title=(
+                "[bold yellow] "
+                "FINDING DETAIL "
+                "[/bold yellow]"
+            ),
+            subtitle=(
+                f"[dim]"
+                f"{finding.finding_id[:12]}"
+                f"[/dim]"
+            ),
+            title_align="left",
+            border_style="yellow",
+            box=box.ROUNDED,
+        )
+    )

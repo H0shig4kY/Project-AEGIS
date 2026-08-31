@@ -48,6 +48,13 @@ from aegis.cli_ui import (
     print_commands_reference,
     set_compact_mode,
     print_exposure_dashboard,
+    print_findings_table,
+    print_finding_detail,
+)
+
+from aegis.exposure import (
+    ExposureAnalyzer,
+    ExposureSeverity,
 )
 
 AEGIS_VERSION = "0.1.0"
@@ -109,6 +116,15 @@ results_app = typer.Typer(
     ),
     no_args_is_help=True,
     rich_markup_mode="rich",
+)
+
+findings_app = typer.Typer(
+    help="Inspect current exposure findings."
+)
+
+app.add_typer(
+    findings_app,
+    name="findings",
 )
 
 app.add_typer(
@@ -209,57 +225,29 @@ def exposure(
         campaign
     )
 
+    # -------------------------------------------------
+    # COLLECT CURRENT CAMPAIGN STATE
+    # -------------------------------------------------
+
     assets = context.assets.find()
+    relations = context.relations.find()
+    changes = context.changes.find()
 
-    asset_counts: dict[
-        str,
-        dict[str, int],
-    ] = {}
+    # -------------------------------------------------
+    # EXPOSURE ANALYSIS
+    # -------------------------------------------------
 
-    for asset in assets:
-        key = asset.type.value
+    analyzer = ExposureAnalyzer()
 
-        if key not in asset_counts:
-            asset_counts[key] = {
-                "active": 0,
-                "inactive": 0,
-            }
-
-        state = (
-            "active"
-            if asset.active
-            else "inactive"
-        )
-
-        asset_counts[
-            key
-        ][
-            state
-        ] += 1
-
-    services = [
-        asset
-        for asset in assets
-        if asset.type == AssetType.SERVICE
-    ]
-
-    relations = (
-        context.relations.find()
+    report = analyzer.analyze(
+        assets=assets,
+        relations=relations,
+        changes=changes,
     )
 
-    tls_relations = [
-        relation
-        for relation in relations
-        if (
-            relation.relation
-            == AssetRelationType.PRESENTS
-        )
-    ]
-
-    changes = (
-        context.changes.find()
-    )
-
+    # Keep recent exposure-related changes for the
+    # dashboard. Exposure findings themselves are
+    # produced by ExposureAnalyzer.
     changes.sort(
         key=lambda change: (
             change.detected_at
@@ -279,28 +267,83 @@ def exposure(
                 AssetRelationType.PRESENTS,
             }
         )
-    ][
-        :10
+    ][:10]
+
+    # Active PRESENTS relations are still useful for
+    # the current CLI TLS table.
+    tls_relations = [
+        relation
+        for relation in relations
+        if (
+            relation.relation
+            == AssetRelationType.PRESENTS
+            and relation.active
+        )
     ]
+
+    # -------------------------------------------------
+    # JSON OUTPUT
+    # -------------------------------------------------
 
     if json_output:
         payload = {
             "assets": (
-                asset_counts
+                report.asset_counts
             ),
             "services": [
                 {
-                    "value": (
-                        asset.value
+                    "value": service.value,
+                    "host": service.host,
+                    "port": service.port,
+                    "service_name": (
+                        service.service_name
+                    ),
+                    "transport": (
+                        service.transport
+                    ),
+                    "tls": service.tls,
+                    "certificate": (
+                        service.certificate
                     ),
                     "source": (
-                        asset.source
+                        service.source
                     ),
                     "active": (
-                        asset.active
+                        service.active
                     ),
                 }
-                for asset in services
+                for service
+                in report.services
+            ],
+            "findings": [
+                {
+                    "rule_id": (
+                        finding.rule_id
+                    ),
+                    "severity": (
+                        finding.severity.value
+                    ),
+                    "title": (
+                        finding.title
+                    ),
+                    "description": (
+                        finding.description
+                    ),
+                    "asset_type": (
+                        finding.asset_type.value
+                    ),
+                    "asset_value": (
+                        finding.asset_value
+                    ),
+                    "affected_service": (
+                        finding.affected_service
+                    ),
+                    "plugin": (
+                        finding.plugin
+                    ),
+                }
+                for finding
+                in report.findings
             ],
             "tls_relations": [
                 {
@@ -340,18 +383,25 @@ def exposure(
 
         return
 
+    # -------------------------------------------------
+    # HUMAN-READABLE OUTPUT
+    # -------------------------------------------------
+
     print_exposure_dashboard(
         asset_counts=(
-            asset_counts
+            report.asset_counts
         ),
         services=(
-            services
+            report.services
         ),
         tls_relations=(
             tls_relations
         ),
         recent_changes=(
             recent_changes
+        ),
+        findings=(
+            report.findings
         ),
     )
 
@@ -3046,6 +3096,297 @@ def relations_history(
         typer.echo(
             line
         )
+
+def get_current_findings(
+    context: AssessmentContext,
+):
+    report = ExposureAnalyzer().analyze(
+        assets=context.assets.find(),
+        relations=context.relations.find(),
+        changes=context.changes.find(),
+    )
+
+    return list(
+        report.findings
+    )
+
+@findings_app.command("list")
+def findings_list(
+    severity: str | None = typer.Option(
+        None,
+        "--severity",
+        help="Filter by severity.",
+    ),
+    rule: str | None = typer.Option(
+        None,
+        "--rule",
+        help="Filter by finding rule.",
+    ),
+    asset_type: str | None = typer.Option(
+        None,
+        "--asset-type",
+        help="Filter by asset type.",
+    ),
+    asset_value: str | None = typer.Option(
+        None,
+        "--asset-value",
+        help="Filter by asset value.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Output findings as JSON.",
+    ),
+):
+    """List current exposure findings."""
+
+    campaign = find_campaign()
+
+    if campaign is None:
+        print_error(
+            "no AEGIS / ARGUS campaign found."
+        )
+        raise typer.Exit(code=1)
+
+    context = AssessmentContext(
+        campaign
+    )
+
+    findings = get_current_findings(
+        context
+    )
+
+    # -------------------------------------------------
+    # FILTERS
+    # -------------------------------------------------
+
+    if severity is not None:
+        normalized = (
+            severity.lower()
+        )
+
+        allowed = {
+            item.value
+            for item
+            in ExposureSeverity
+        }
+
+        if normalized not in allowed:
+            print_error(
+                f"invalid severity: {severity}"
+            )
+            raise typer.Exit(code=1)
+
+        findings = [
+            finding
+            for finding in findings
+            if (
+                finding.severity.value
+                == normalized
+            )
+        ]
+
+    if rule is not None:
+        normalized_rule = (
+            rule.upper()
+        )
+
+        findings = [
+            finding
+            for finding in findings
+            if (
+                finding.rule_id.upper()
+                == normalized_rule
+            )
+        ]
+
+    if asset_type is not None:
+        try:
+            parsed_asset_type = (
+                AssetType(
+                    asset_type.lower()
+                )
+            )
+        except ValueError:
+            print_error(
+                f"invalid asset type: {asset_type}"
+            )
+            raise typer.Exit(code=1)
+
+        findings = [
+            finding
+            for finding in findings
+            if (
+                finding.asset_type
+                == parsed_asset_type
+            )
+        ]
+
+    if asset_value is not None:
+        findings = [
+            finding
+            for finding in findings
+            if (
+                finding.asset_value
+                == asset_value
+            )
+        ]
+
+    # -------------------------------------------------
+    # SORT
+    # -------------------------------------------------
+
+    severity_order = {
+        ExposureSeverity.CRITICAL: 0,
+        ExposureSeverity.HIGH: 1,
+        ExposureSeverity.MEDIUM: 2,
+        ExposureSeverity.LOW: 3,
+        ExposureSeverity.INFO: 4,
+    }
+
+    findings.sort(
+        key=lambda finding: (
+            severity_order[
+                finding.severity
+            ],
+            finding.rule_id,
+            finding.asset_value,
+            finding.affected_service or "",
+        )
+    )
+
+    # -------------------------------------------------
+    # JSON
+    # -------------------------------------------------
+
+    if json_output:
+        payload = [
+            {
+                "id": (
+                    finding.finding_id
+                ),
+                "rule_id": (
+                    finding.rule_id
+                ),
+                "severity": (
+                    finding.severity.value
+                ),
+                "title": (
+                    finding.title
+                ),
+                "description": (
+                    finding.description
+                ),
+                "asset_type": (
+                    finding.asset_type.value
+                ),
+                "asset_value": (
+                    finding.asset_value
+                ),
+                "affected_service": (
+                    finding.affected_service
+                ),
+                "plugin": (
+                    finding.plugin
+                ),
+            }
+            for finding in findings
+        ]
+
+        typer.echo(
+            json.dumps(
+                payload,
+                indent=2,
+            )
+        )
+
+        return
+
+    print_findings_table(
+        findings
+    )
+
+@findings_app.command("show")
+def findings_show(
+    finding_id: str = typer.Argument(
+        ...,
+        help="Finding ID or unique ID prefix.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Output finding as JSON.",
+    ),
+):
+    """Show detailed information about a finding."""
+
+    campaign = find_campaign()
+
+    if campaign is None:
+        print_error(
+            "no AEGIS / ARGUS campaign found."
+        )
+        raise typer.Exit(code=1)
+
+    context = AssessmentContext(
+        campaign
+    )
+
+    findings = get_current_findings(
+        context
+    )
+
+    normalized_id = (
+        finding_id.strip().lower()
+    )
+
+    matches = [
+        finding
+        for finding in findings
+        if finding.finding_id.startswith(
+            normalized_id
+        )
+    ]
+
+    if not matches:
+        print_error(
+            f"finding not found: {finding_id}"
+        )
+        raise typer.Exit(code=1)
+
+    if len(matches) > 1:
+        print_error(
+            f"finding ID prefix is ambiguous: {finding_id}"
+        )
+        raise typer.Exit(code=1)
+
+    finding = matches[0]
+
+    if json_output:
+        payload = {
+            "id": finding.finding_id,
+            "rule_id": finding.rule_id,
+            "severity": finding.severity.value,
+            "title": finding.title,
+            "description": finding.description,
+            "asset_type": finding.asset_type.value,
+            "asset_value": finding.asset_value,
+            "affected_service": finding.affected_service,
+            "plugin": finding.plugin,
+        }
+
+        typer.echo(
+            json.dumps(
+                payload,
+                indent=2,
+            )
+        )
+
+        return
+
+    print_finding_detail(
+        finding
+    )
     
 if __name__ == "__main__":
     app()
