@@ -47,6 +47,7 @@ from aegis.cli_ui import (
     print_status_dashboard,
     print_commands_reference,
     set_compact_mode,
+    print_exposure_dashboard,
 )
 
 AEGIS_VERSION = "0.1.0"
@@ -185,6 +186,174 @@ def commands():
     """Show common AEGIS / ARGUS commands and examples."""
 
     print_commands_reference()
+
+@app.command()
+def exposure(
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Output exposure summary as JSON.",
+    ),
+):
+    """Show the current assessed exposure surface."""
+
+    campaign = find_campaign()
+
+    if campaign is None:
+        print_error(
+            "no AEGIS / ARGUS campaign found."
+        )
+        raise typer.Exit(code=1)
+
+    context = AssessmentContext(
+        campaign
+    )
+
+    assets = context.assets.find()
+
+    asset_counts: dict[
+        str,
+        dict[str, int],
+    ] = {}
+
+    for asset in assets:
+        key = asset.type.value
+
+        if key not in asset_counts:
+            asset_counts[key] = {
+                "active": 0,
+                "inactive": 0,
+            }
+
+        state = (
+            "active"
+            if asset.active
+            else "inactive"
+        )
+
+        asset_counts[
+            key
+        ][
+            state
+        ] += 1
+
+    services = [
+        asset
+        for asset in assets
+        if asset.type == AssetType.SERVICE
+    ]
+
+    relations = (
+        context.relations.find()
+    )
+
+    tls_relations = [
+        relation
+        for relation in relations
+        if (
+            relation.relation
+            == AssetRelationType.PRESENTS
+        )
+    ]
+
+    changes = (
+        context.changes.find()
+    )
+
+    changes.sort(
+        key=lambda change: (
+            change.detected_at
+        ),
+        reverse=True,
+    )
+
+    recent_changes = [
+        change
+        for change in changes
+        if (
+            change.asset_type
+            == AssetType.SERVICE
+            or change.relation_type
+            in {
+                AssetRelationType.EXPOSES,
+                AssetRelationType.PRESENTS,
+            }
+        )
+    ][
+        :10
+    ]
+
+    if json_output:
+        payload = {
+            "assets": (
+                asset_counts
+            ),
+            "services": [
+                {
+                    "value": (
+                        asset.value
+                    ),
+                    "source": (
+                        asset.source
+                    ),
+                    "active": (
+                        asset.active
+                    ),
+                }
+                for asset in services
+            ],
+            "tls_relations": [
+                {
+                    "service": (
+                        relation.source_value
+                    ),
+                    "certificate": (
+                        relation.target_value
+                    ),
+                    "active": (
+                        relation.active
+                    ),
+                }
+                for relation
+                in tls_relations
+            ],
+            "recent_changes": [
+                {
+                    "change_type": (
+                        change.change_type.value
+                    ),
+                    "plugin": (
+                        change.plugin
+                    ),
+                }
+                for change
+                in recent_changes
+            ],
+        }
+
+        typer.echo(
+            json.dumps(
+                payload,
+                indent=2,
+            )
+        )
+
+        return
+
+    print_exposure_dashboard(
+        asset_counts=(
+            asset_counts
+        ),
+        services=(
+            services
+        ),
+        tls_relations=(
+            tls_relations
+        ),
+        recent_changes=(
+            recent_changes
+        ),
+    )
 
 @app.command()
 def status(

@@ -207,6 +207,10 @@ def print_root_commands():
             "Show the current campaign operational overview.",
         ),
         (
+            "exposure",
+            "Show the current assessed exposure surface.",
+        ),
+        (
             "commands",
             "Show common commands and practical examples.",
         ),
@@ -2055,6 +2059,19 @@ def print_commands_reference():
             ],
         ),
         (
+            "EXPOSURE",
+            [
+                (
+                    "aegis exposure",
+                    "Show the current assessed exposure surface.",
+                ),
+                (
+                    "aegis exposure --json",
+                    "Output the exposure surface as JSON.",
+                ),
+            ],
+        ),
+        (
             "SCOPE",
             [
                 (
@@ -3483,6 +3500,184 @@ def print_status_dashboard(
                 title="[bold magenta] LATEST EXECUTION [/bold magenta]",
                 title_align="left",
                 border_style="magenta",
+                box=box.ROUNDED,
+            )
+        )
+
+def print_exposure_dashboard(
+    *,
+    asset_counts: dict[str, dict[str, int]],
+    services: list[Any],
+    tls_relations: list[Any],
+    recent_changes: list[Any],
+):
+    console.print()
+
+    console.print(
+        Panel(
+            "[bold cyan]AEGIS[/bold cyan] / "
+            "[bold magenta]EXPOSURE[/bold magenta]\n"
+            "[dim]Current externally visible assessment surface[/dim]",
+            border_style="cyan",
+            box=box.ROUNDED,
+        )
+    )
+
+    summary = Table(
+        box=box.ROUNDED,
+        header_style="bold cyan",
+        expand=True,
+    )
+
+    summary.add_column("Type")
+    summary.add_column("Active", justify="right")
+    summary.add_column("Inactive", justify="right")
+
+    for asset_type, counts in sorted(
+        asset_counts.items()
+    ):
+        summary.add_row(
+            asset_type.upper(),
+            str(
+                counts.get(
+                    "active",
+                    0,
+                )
+            ),
+            str(
+                counts.get(
+                    "inactive",
+                    0,
+                )
+            ),
+        )
+
+    console.print(
+        Panel(
+            summary,
+            title="[bold cyan] EXPOSURE SUMMARY [/bold cyan]",
+            title_align="left",
+            border_style="cyan",
+            box=box.ROUNDED,
+        )
+    )
+
+    if services:
+        service_table = Table(
+            box=box.ROUNDED,
+            header_style="bold magenta",
+            expand=True,
+        )
+
+        service_table.add_column(
+            "Service",
+        )
+
+        service_table.add_column(
+            "Source",
+        )
+
+        service_table.add_column(
+            "State",
+            width=12,
+        )
+
+        for asset in services:
+            service_table.add_row(
+                asset.value,
+                asset.source,
+                active_state_text(
+                    asset.active
+                ),
+            )
+
+        console.print(
+            Panel(
+                service_table,
+                title="[bold magenta] SERVICES [/bold magenta]",
+                title_align="left",
+                border_style="magenta",
+                box=box.ROUNDED,
+            )
+        )
+
+    if tls_relations:
+        tls_table = Table(
+            box=box.ROUNDED,
+            header_style="bold magenta",
+            expand=True,
+        )
+
+        tls_table.add_column(
+            "Service",
+        )
+
+        tls_table.add_column(
+            "Certificate",
+        )
+
+        tls_table.add_column(
+            "State",
+            width=12,
+        )
+
+        for relation in tls_relations:
+            tls_table.add_row(
+                relation.source_value,
+                relation.target_value,
+                active_state_text(
+                    relation.active
+                ),
+            )
+
+        console.print(
+            Panel(
+                tls_table,
+                title="[bold magenta] TLS EXPOSURE [/bold magenta]",
+                title_align="left",
+                border_style="magenta",
+                box=box.ROUNDED,
+            )
+        )
+
+    if recent_changes:
+        change_table = Table(
+            box=box.ROUNDED,
+            header_style="bold yellow",
+            expand=True,
+        )
+
+        change_table.add_column(
+            "State",
+            width=18,
+        )
+
+        change_table.add_column(
+            "Object",
+        )
+
+        change_table.add_column(
+            "Plugin",
+            width=12,
+        )
+
+        for change in recent_changes:
+            change_table.add_row(
+                lifecycle_text(
+                    change.change_type
+                ),
+                change_object_text(
+                    change
+                ),
+                change.plugin,
+            )
+
+        console.print(
+            Panel(
+                change_table,
+                title="[bold yellow] RECENT EXPOSURE CHANGES [/bold yellow]",
+                title_align="left",
+                border_style="yellow",
                 box=box.ROUNDED,
             )
         )
