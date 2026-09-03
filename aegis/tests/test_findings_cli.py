@@ -1,41 +1,32 @@
 import json
+
 from datetime import (
     datetime,
-    timedelta,
     timezone,
 )
+
 from pathlib import Path
 
 from typer.testing import CliRunner
 
-from aegis.assessment import AssessmentContext
+from aegis.assessment import (
+    AssessmentContext,
+)
+
 from aegis.cli import app
-from aegis.context import CampaignContext
+
+from aegis.context import (
+    CampaignContext,
+)
+
 from aegis.models import (
     Asset,
     AssetType,
 )
 
-from aegis.exposure import (
-    ExposureAnalyzer,
-)
-
 
 runner = CliRunner()
 
-def get_http_finding_id(
-    context,
-):
-    report = ExposureAnalyzer().analyze(
-        assets=context.assets.find(),
-        relations=context.relations.find(),
-        changes=context.changes.find(),
-    )
-
-    return (
-        report.findings[0]
-        .finding_id
-    )
 
 def create_context(
     tmp_path: Path,
@@ -81,6 +72,35 @@ def add_http_finding_asset(
         )
     )
 
+    context.finding_processor.process(
+        observed_at=datetime(
+            2026,
+            9,
+            3,
+            12,
+            0,
+            tzinfo=timezone.utc,
+        ),
+        observed_plugin="service",
+    )
+
+
+def get_http_finding_id(
+    context,
+):
+    findings = (
+        context.findings.find()
+    )
+
+    assert len(
+        findings
+    ) == 1
+
+    return (
+        findings[0]
+        .finding_id
+    )
+
 
 def test_findings_list_empty(
     tmp_path,
@@ -103,7 +123,11 @@ def test_findings_list_empty(
     )
 
     assert result.exit_code == 0
-    assert "No findings found." in result.output
+
+    assert (
+        "No findings found."
+        in result.output
+    )
 
 
 def test_findings_list(
@@ -118,15 +142,10 @@ def test_findings_list(
         context
     )
 
-    report = ExposureAnalyzer().analyze(
-        assets=context.assets.find(),
-        relations=context.relations.find(),
-        changes=context.changes.find(),
-    )
-
     finding_id = (
-        report.findings[0]
-        .finding_id
+        get_http_finding_id(
+            context
+        )
     )
 
     monkeypatch.chdir(
@@ -142,9 +161,26 @@ def test_findings_list(
     )
 
     assert result.exit_code == 0
-    assert "HTTP_WITHOUT_TLS" in result.output
-    assert "MEDIUM" in result.output
-    assert finding_id[:12] in result.output
+
+    assert (
+        "HTTP_WITHOUT_TLS"
+        in result.output
+    )
+
+    assert (
+        "MEDIUM"
+        in result.output
+    )
+
+    assert (
+        "ACTIVE"
+        in result.output
+    )
+
+    assert (
+        finding_id[:8]
+        in result.output
+    )
 
 
 def test_findings_filter_by_severity(
@@ -174,7 +210,11 @@ def test_findings_filter_by_severity(
     )
 
     assert result.exit_code == 0
-    assert "HTTP_WITHOUT_TLS" in result.output
+
+    assert (
+        "HTTP_WITHOUT_TLS"
+        in result.output
+    )
 
 
 def test_findings_filter_by_rule(
@@ -204,7 +244,11 @@ def test_findings_filter_by_rule(
     )
 
     assert result.exit_code == 0
-    assert "HTTP_WITHOUT_TLS" in result.output
+
+    assert (
+        "HTTP_WITHOUT_TLS"
+        in result.output
+    )
 
 
 def test_findings_filter_by_asset_type(
@@ -234,7 +278,45 @@ def test_findings_filter_by_asset_type(
     )
 
     assert result.exit_code == 0
-    assert "HTTP_WITHOUT_TLS" in result.output
+
+    assert (
+        "HTTP_WITHOUT_TLS"
+        in result.output
+    )
+
+
+def test_findings_filter_by_state(
+    tmp_path,
+    monkeypatch,
+):
+    context = create_context(
+        tmp_path
+    )
+
+    add_http_finding_asset(
+        context
+    )
+
+    monkeypatch.chdir(
+        context.root
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "findings",
+            "list",
+            "--state",
+            "active",
+        ],
+    )
+
+    assert result.exit_code == 0
+
+    assert (
+        "HTTP_WITHOUT_TLS"
+        in result.output
+    )
 
 
 def test_findings_json(
@@ -291,6 +373,16 @@ def test_findings_json(
     )
 
     assert (
+        finding["state"]
+        == "active"
+    )
+
+    assert (
+        finding["active"]
+        is True
+    )
+
+    assert (
         finding["asset_type"]
         == "service"
     )
@@ -308,6 +400,39 @@ def test_findings_json(
     assert (
         finding["plugin"]
         is None
+    )
+
+    assert (
+        finding["seen_count"]
+        == 1
+    )
+
+    assert (
+        finding["missing_count"]
+        == 0
+    )
+
+    assert (
+        finding["coverage_plugins"]
+        == [
+            "service",
+            "http",
+        ]
+    )
+
+    assert (
+        finding["first_seen"]
+        is not None
+    )
+
+    assert (
+        finding["last_seen"]
+        is not None
+    )
+
+    assert (
+        finding["last_confirmed"]
+        is not None
     )
 
 
@@ -334,7 +459,42 @@ def test_findings_rejects_invalid_severity(
     )
 
     assert result.exit_code == 1
-    assert "invalid severity" in result.output
+
+    assert (
+        "invalid severity"
+        in result.output
+    )
+
+
+def test_findings_rejects_invalid_state(
+    tmp_path,
+    monkeypatch,
+):
+    context = create_context(
+        tmp_path
+    )
+
+    monkeypatch.chdir(
+        context.root
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "findings",
+            "list",
+            "--state",
+            "impossible",
+        ],
+    )
+
+    assert result.exit_code == 1
+
+    assert (
+        "invalid finding state"
+        in result.output
+    )
+
 
 def test_findings_show(
     tmp_path,
@@ -348,8 +508,10 @@ def test_findings_show(
         context
     )
 
-    finding_id = get_http_finding_id(
-        context
+    finding_id = (
+        get_http_finding_id(
+            context
+        )
     )
 
     monkeypatch.chdir(
@@ -366,9 +528,31 @@ def test_findings_show(
     )
 
     assert result.exit_code == 0
-    assert "FINDING DETAIL" in result.output
-    assert "HTTP_WITHOUT_TLS" in result.output
-    assert finding_id[:12] in result.output
+
+    assert (
+        "FINDING DETAIL"
+        in result.output
+    )
+
+    assert (
+        "HTTP_WITHOUT_TLS"
+        in result.output
+    )
+
+    assert (
+        finding_id[:12]
+        in result.output
+    )
+
+    assert (
+        "ACTIVE"
+        in result.output
+    )
+
+    assert (
+        "service, http"
+        in result.output
+    )
 
 
 def test_findings_show_json(
@@ -383,8 +567,10 @@ def test_findings_show_json(
         context
     )
 
-    finding_id = get_http_finding_id(
-        context
+    finding_id = (
+        get_http_finding_id(
+            context
+        )
     )
 
     monkeypatch.chdir(
@@ -418,8 +604,56 @@ def test_findings_show_json(
     )
 
     assert (
+        payload["severity"]
+        == "medium"
+    )
+
+    assert (
+        payload["state"]
+        == "active"
+    )
+
+    assert (
+        payload["active"]
+        is True
+    )
+
+    assert (
         payload["asset_value"]
         == "example.com:80"
+    )
+
+    assert (
+        payload["seen_count"]
+        == 1
+    )
+
+    assert (
+        payload["missing_count"]
+        == 0
+    )
+
+    assert (
+        payload["coverage_plugins"]
+        == [
+            "service",
+            "http",
+        ]
+    )
+
+    assert (
+        payload["first_seen"]
+        is not None
+    )
+
+    assert (
+        payload["last_seen"]
+        is not None
+    )
+
+    assert (
+        payload["last_confirmed"]
+        is not None
     )
 
 
@@ -449,4 +683,8 @@ def test_findings_show_not_found(
     )
 
     assert result.exit_code == 1
-    assert "finding not found" in result.output
+
+    assert (
+        "finding not found"
+        in result.output
+    )

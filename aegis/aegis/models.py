@@ -1,6 +1,7 @@
 from enum import Enum
 from typing import Any
 from datetime import datetime, timezone
+from dataclasses import dataclass
 
 from pydantic import (
     BaseModel,
@@ -298,3 +299,44 @@ class ChangeType(str, Enum):
     CANDIDATE_MISSING = "candidate_missing"
     INACTIVE = "inactive"
     REACTIVATED = "reactivated"
+
+class FindingState(
+    str,
+    Enum,
+):
+    ACTIVE = "active"
+    CANDIDATE_MISSING = "candidate_missing"
+    RESOLVED = "resolved"
+
+@dataclass
+class FindingRecord:
+    finding_id: str
+    rule_id: str
+    severity: str
+
+    title: str
+    description: str
+
+    asset_type: AssetType
+    asset_value: str
+
+    affected_service: str | None = None
+    plugin: str | None = None
+
+    coverage_plugins: tuple[
+        str,
+        ...
+    ] = ()
+
+    state: FindingState = (
+        FindingState.ACTIVE
+    )
+
+    first_seen: datetime | None = None
+    last_seen: datetime | None = None
+    last_confirmed: datetime | None = None
+
+    seen_count: int = 0
+    missing_count: int = 0
+
+    active: bool = True

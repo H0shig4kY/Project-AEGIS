@@ -47,6 +47,9 @@ def terminal_width() -> int:
 def terminal_is_compact(
     threshold: int = 110,
 ) -> bool:
+    if _layout_override is not None:
+        return _layout_override
+
     width = shutil.get_terminal_size(
         fallback=(120, 30)
     ).columns
@@ -158,6 +161,45 @@ def print_banner():
 
     console.print()
 
+def _finding_severity_value(
+    finding,
+) -> str:
+    severity = finding.severity
+
+    if hasattr(
+        severity,
+        "value",
+    ):
+        return severity.value
+
+    return str(
+        severity
+    )
+
+
+def _finding_state_value(
+    finding,
+) -> str | None:
+    state = getattr(
+        finding,
+        "state",
+        None,
+    )
+
+    if state is None:
+        return None
+
+    if hasattr(
+        state,
+        "value",
+    ):
+        return state.value
+
+    return str(
+        state
+    )
+
+
 def print_wide_findings(
     findings,
 ):
@@ -209,7 +251,9 @@ def print_wide_findings(
 
     for finding in findings:
         severity = (
-            finding.severity.value
+            _finding_severity_value(
+                finding
+            )
         )
 
         severity_text = Text(
@@ -253,6 +297,7 @@ def print_wide_findings(
         )
     )
 
+
 def print_compact_findings(
     findings,
 ):
@@ -280,7 +325,9 @@ def print_compact_findings(
         findings
     ):
         severity = (
-            finding.severity.value
+            _finding_severity_value(
+                finding
+            )
         )
 
         severity_text = Text()
@@ -314,6 +361,24 @@ def print_compact_findings(
         )
 
         body.append("\n")
+
+        state = (
+            _finding_state_value(
+                finding
+            )
+        )
+
+        if state is not None:
+            body.append(
+                "State: ",
+                style="bold cyan",
+            )
+
+            body.append(
+                state.upper()
+            )
+
+            body.append("\n")
 
         body.append(
             "Asset: ",
@@ -2311,7 +2376,19 @@ def print_commands_reference():
             [
                 (
                     "aegis findings list",
-                    "List current exposure findings.",
+                    "List persisted exposure findings.",
+                ),
+                (
+                    "aegis findings list --state active",
+                    "Show active findings.",
+                ),
+                (
+                    "aegis findings list --state resolved",
+                    "Show resolved findings.",
+                ),
+                (
+                    "aegis findings list --state candidate_missing",
+                    "Show findings awaiting missing confirmation.",
                 ),
                 (
                     "aegis findings list --severity high",
@@ -4046,7 +4123,7 @@ def print_findings_table(
         return
 
     findings_table = Table(
-        title="Exposure Findings",
+        title="Persisted Findings",
         box=box.ROUNDED,
         border_style="yellow",
         header_style="bold yellow",
@@ -4061,13 +4138,19 @@ def print_findings_table(
 
     findings_table.add_column(
         "Severity",
-        width=12,
+        width=10,
+        no_wrap=True,
+    )
+
+    findings_table.add_column(
+        "State",
+        width=18,
         no_wrap=True,
     )
 
     findings_table.add_column(
         "Rule",
-        width=28,
+        width=26,
     )
 
     findings_table.add_column(
@@ -4093,9 +4176,24 @@ def print_findings_table(
         "critical": "bold white on red",
     }
 
+    state_styles = {
+        "active": "bold green",
+        "candidate_missing": "bold yellow",
+        "resolved": "bold red",
+    }
+
     for finding in findings:
         severity = (
-            finding.severity.value
+            _finding_severity_value(
+                finding
+            )
+        )
+
+        state = (
+            _finding_state_value(
+                finding
+            )
+            or "unknown"
         )
 
         findings_table.add_row(
@@ -4104,6 +4202,13 @@ def print_findings_table(
                 severity.upper(),
                 style=severity_styles.get(
                     severity,
+                    "white",
+                ),
+            ),
+            Text(
+                state.upper(),
+                style=state_styles.get(
+                    state,
                     "white",
                 ),
             ),
@@ -4127,13 +4232,23 @@ def print_findings_table(
         findings_table
     )
 
+
 def print_finding_detail(
     finding,
 ):
     console.print()
 
     severity = (
-        finding.severity.value
+        _finding_severity_value(
+            finding
+        )
+    )
+
+    state = (
+        _finding_state_value(
+            finding
+        )
+        or "unknown"
     )
 
     severity_styles = {
@@ -4142,6 +4257,12 @@ def print_finding_detail(
         "medium": "bold yellow",
         "high": "bold red",
         "critical": "bold white on red",
+    }
+
+    state_styles = {
+        "active": "bold green",
+        "candidate_missing": "bold yellow",
+        "resolved": "bold red",
     }
 
     table = Table(
@@ -4184,6 +4305,33 @@ def print_finding_detail(
     )
 
     table.add_row(
+        "State",
+        Text(
+            state.upper(),
+            style=state_styles.get(
+                state,
+                "white",
+            ),
+        ),
+    )
+
+    table.add_row(
+        "Active",
+        Text(
+            (
+                "YES"
+                if finding.active
+                else "NO"
+            ),
+            style=(
+                "bold green"
+                if finding.active
+                else "bold red"
+            ),
+        ),
+    )
+
+    table.add_row(
         "Rule",
         finding.rule_id,
     )
@@ -4213,6 +4361,55 @@ def print_finding_detail(
         "Plugin",
         finding.plugin
         or "-",
+    )
+
+    table.add_row(
+        "Coverage Plugins",
+        ", ".join(
+            finding.coverage_plugins
+        )
+        or "-",
+    )
+
+    table.add_row(
+        "First Seen",
+        (
+            finding.first_seen.isoformat()
+            if finding.first_seen
+            else "-"
+        ),
+    )
+
+    table.add_row(
+        "Last Seen",
+        (
+            finding.last_seen.isoformat()
+            if finding.last_seen
+            else "-"
+        ),
+    )
+
+    table.add_row(
+        "Last Confirmed",
+        (
+            finding.last_confirmed.isoformat()
+            if finding.last_confirmed
+            else "-"
+        ),
+    )
+
+    table.add_row(
+        "Seen Count",
+        str(
+            finding.seen_count
+        ),
+    )
+
+    table.add_row(
+        "Missing Count",
+        str(
+            finding.missing_count
+        ),
     )
 
     table.add_row(

@@ -60,6 +60,8 @@ class ExposureFinding:
 
     affected_service: str | None = None
 
+    coverage_plugins: tuple[str, ...] = ()
+
     @property
     def finding_id(
         self,
@@ -421,6 +423,10 @@ class ExposureAnalyzer:
                         asset_value=(
                             service.value
                         ),
+                        coverage_plugins=(
+                            "service",
+                            "http",
+                        ),
                     )
                 )
 
@@ -576,6 +582,9 @@ class ExposureAnalyzer:
                             affected_service=(
                                 service_value
                             ),
+                            coverage_plugins=(
+                                "tls",
+                            ),
                         )
                     )
 
@@ -642,6 +651,9 @@ class ExposureAnalyzer:
                             plugin="tls",
                             affected_service=(
                                 service_value
+                            ),
+                            coverage_plugins=(
+                                "tls",
                             ),
                         )
                     )
@@ -843,6 +855,9 @@ class ExposureAnalyzer:
                         ),
                         plugin=(
                             change.plugin
+                        ),
+                        coverage_plugins=(
+                            "service",
                         ),
                     )
                 )

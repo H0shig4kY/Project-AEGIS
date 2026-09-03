@@ -2,6 +2,7 @@ from pathlib import Path
 
 from aegis.assessment import AssessmentContext
 from aegis.context import CampaignContext
+from aegis.finding_store import FindingStore
 
 def test_assessment_context(tmp_path: Path):
     campaign = tmp_path / "campaign"
@@ -166,4 +167,84 @@ def test_assessment_context_has_observation_processor(
     assert (
         context.observation_processor.asset_store
         is context.assets
+    )
+
+def test_assessment_context_has_finding_store(
+    tmp_path,
+):
+    campaign = tmp_path / "campaign"
+    campaign.mkdir()
+
+    (
+        campaign
+        / "aegis.yaml"
+    ).write_text(
+        "name: test\n",
+        encoding="utf-8",
+    )
+
+    context = AssessmentContext(
+        CampaignContext(
+            campaign
+        )
+    )
+
+    assert isinstance(
+        context.findings,
+        FindingStore,
+    )
+
+    assert (
+        context.findings_dir
+        == campaign / "data" / "findings"
+    )
+
+    assert (
+        context.findings.find()
+        == []
+    )
+
+def test_assessment_context_has_finding_processor(
+    tmp_path,
+):
+    campaign = tmp_path / "campaign"
+    campaign.mkdir()
+
+    (
+        campaign
+        / "aegis.yaml"
+    ).write_text(
+        "name: test\n",
+        encoding="utf-8",
+    )
+
+    context = AssessmentContext(
+        CampaignContext(
+            campaign
+        )
+    )
+
+    assert (
+        context.finding_processor
+        is not None
+    )
+
+    assert (
+        context.finding_processor.finding_store
+        is context.findings
+    )
+
+    assert (
+        context.finding_processor.asset_store
+        is context.assets
+    )
+
+    assert (
+        context.finding_processor.relation_store
+        is context.relations
+    )
+
+    assert (
+        context.finding_processor.change_store
+        is context.changes
     )

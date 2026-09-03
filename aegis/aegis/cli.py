@@ -23,6 +23,7 @@ from aegis.models import (
     AssetType,
     ChangeType,
     IntegrityBaselineType,
+    FindingState,
 )
 from aegis.plugins.registry import (
     create_plugin_manager,
@@ -1055,6 +1056,15 @@ def plugin_run(name: str):
                 saved_path=saved_path,
                 previous_path=previous_path,
             )
+        )
+
+        # -------------------------------------------------
+        # EXPOSURE FINDING LIFECYCLE
+        # -------------------------------------------------
+
+        context.finding_processor.process(
+            observed_at=result.timestamp,
+            observed_plugin=result.plugin,
         )
 
     except ValueError as exc:
@@ -3100,15 +3110,9 @@ def relations_history(
 def get_current_findings(
     context: AssessmentContext,
 ):
-    report = ExposureAnalyzer().analyze(
-        assets=context.assets.find(),
-        relations=context.relations.find(),
-        changes=context.changes.find(),
-    )
+    """Return persisted finding lifecycle records."""
+    return context.findings.find()
 
-    return list(
-        report.findings
-    )
 
 @findings_app.command("list")
 def findings_list(
@@ -3116,6 +3120,11 @@ def findings_list(
         None,
         "--severity",
         help="Filter by severity.",
+    ),
+    state: str | None = typer.Option(
+        None,
+        "--state",
+        help="Filter by finding lifecycle state.",
     ),
     rule: str | None = typer.Option(
         None,
@@ -3138,7 +3147,7 @@ def findings_list(
         help="Output findings as JSON.",
     ),
 ):
-    """List current exposure findings."""
+    """List persisted exposure findings."""
 
     campaign = find_campaign()
 
@@ -3161,9 +3170,7 @@ def findings_list(
     # -------------------------------------------------
 
     if severity is not None:
-        normalized = (
-            severity.lower()
-        )
+        normalized = severity.lower()
 
         allowed = {
             item.value
@@ -3180,32 +3187,43 @@ def findings_list(
         findings = [
             finding
             for finding in findings
-            if (
-                finding.severity.value
-                == normalized
-            )
+            if finding.severity == normalized
         ]
 
-    if rule is not None:
-        normalized_rule = (
-            rule.upper()
-        )
+    if state is not None:
+        normalized_state = state.lower()
+
+        allowed_states = {
+            item.value
+            for item
+            in FindingState
+        }
+
+        if normalized_state not in allowed_states:
+            print_error(
+                f"invalid finding state: {state}"
+            )
+            raise typer.Exit(code=1)
 
         findings = [
             finding
             for finding in findings
-            if (
-                finding.rule_id.upper()
-                == normalized_rule
-            )
+            if finding.state.value == normalized_state
+        ]
+
+    if rule is not None:
+        normalized_rule = rule.upper()
+
+        findings = [
+            finding
+            for finding in findings
+            if finding.rule_id.upper() == normalized_rule
         ]
 
     if asset_type is not None:
         try:
-            parsed_asset_type = (
-                AssetType(
-                    asset_type.lower()
-                )
+            parsed_asset_type = AssetType(
+                asset_type.lower()
             )
         except ValueError:
             print_error(
@@ -3216,20 +3234,14 @@ def findings_list(
         findings = [
             finding
             for finding in findings
-            if (
-                finding.asset_type
-                == parsed_asset_type
-            )
+            if finding.asset_type == parsed_asset_type
         ]
 
     if asset_value is not None:
         findings = [
             finding
             for finding in findings
-            if (
-                finding.asset_value
-                == asset_value
-            )
+            if finding.asset_value == asset_value
         ]
 
     # -------------------------------------------------
@@ -3237,18 +3249,20 @@ def findings_list(
     # -------------------------------------------------
 
     severity_order = {
-        ExposureSeverity.CRITICAL: 0,
-        ExposureSeverity.HIGH: 1,
-        ExposureSeverity.MEDIUM: 2,
-        ExposureSeverity.LOW: 3,
-        ExposureSeverity.INFO: 4,
+        "critical": 0,
+        "high": 1,
+        "medium": 2,
+        "low": 3,
+        "info": 4,
     }
 
     findings.sort(
         key=lambda finding: (
-            severity_order[
-                finding.severity
-            ],
+            severity_order.get(
+                finding.severity,
+                99,
+            ),
+            finding.state.value,
             finding.rule_id,
             finding.asset_value,
             finding.affected_service or "",
@@ -3262,33 +3276,37 @@ def findings_list(
     if json_output:
         payload = [
             {
-                "id": (
-                    finding.finding_id
+                "id": finding.finding_id,
+                "rule_id": finding.rule_id,
+                "severity": finding.severity,
+                "state": finding.state.value,
+                "active": finding.active,
+                "title": finding.title,
+                "description": finding.description,
+                "asset_type": finding.asset_type.value,
+                "asset_value": finding.asset_value,
+                "affected_service": finding.affected_service,
+                "plugin": finding.plugin,
+                "coverage_plugins": list(
+                    finding.coverage_plugins
                 ),
-                "rule_id": (
-                    finding.rule_id
+                "first_seen": (
+                    finding.first_seen.isoformat()
+                    if finding.first_seen
+                    else None
                 ),
-                "severity": (
-                    finding.severity.value
+                "last_seen": (
+                    finding.last_seen.isoformat()
+                    if finding.last_seen
+                    else None
                 ),
-                "title": (
-                    finding.title
+                "last_confirmed": (
+                    finding.last_confirmed.isoformat()
+                    if finding.last_confirmed
+                    else None
                 ),
-                "description": (
-                    finding.description
-                ),
-                "asset_type": (
-                    finding.asset_type.value
-                ),
-                "asset_value": (
-                    finding.asset_value
-                ),
-                "affected_service": (
-                    finding.affected_service
-                ),
-                "plugin": (
-                    finding.plugin
-                ),
+                "seen_count": finding.seen_count,
+                "missing_count": finding.missing_count,
             }
             for finding in findings
         ]
@@ -3299,12 +3317,12 @@ def findings_list(
                 indent=2,
             )
         )
-
         return
 
     print_findings_table(
         findings
     )
+
 
 @findings_app.command("show")
 def findings_show(
@@ -3318,7 +3336,7 @@ def findings_show(
         help="Output finding as JSON.",
     ),
 ):
-    """Show detailed information about a finding."""
+    """Show detailed information about a persisted finding."""
 
     campaign = find_campaign()
 
@@ -3332,47 +3350,49 @@ def findings_show(
         campaign
     )
 
-    findings = get_current_findings(
-        context
+    finding = context.findings.find_by_id(
+        finding_id
     )
 
-    normalized_id = (
-        finding_id.strip().lower()
-    )
-
-    matches = [
-        finding
-        for finding in findings
-        if finding.finding_id.startswith(
-            normalized_id
-        )
-    ]
-
-    if not matches:
+    if finding is None:
         print_error(
             f"finding not found: {finding_id}"
         )
         raise typer.Exit(code=1)
 
-    if len(matches) > 1:
-        print_error(
-            f"finding ID prefix is ambiguous: {finding_id}"
-        )
-        raise typer.Exit(code=1)
-
-    finding = matches[0]
-
     if json_output:
         payload = {
             "id": finding.finding_id,
             "rule_id": finding.rule_id,
-            "severity": finding.severity.value,
+            "severity": finding.severity,
+            "state": finding.state.value,
+            "active": finding.active,
             "title": finding.title,
             "description": finding.description,
             "asset_type": finding.asset_type.value,
             "asset_value": finding.asset_value,
             "affected_service": finding.affected_service,
             "plugin": finding.plugin,
+            "coverage_plugins": list(
+                finding.coverage_plugins
+            ),
+            "first_seen": (
+                finding.first_seen.isoformat()
+                if finding.first_seen
+                else None
+            ),
+            "last_seen": (
+                finding.last_seen.isoformat()
+                if finding.last_seen
+                else None
+            ),
+            "last_confirmed": (
+                finding.last_confirmed.isoformat()
+                if finding.last_confirmed
+                else None
+            ),
+            "seen_count": finding.seen_count,
+            "missing_count": finding.missing_count,
         }
 
         typer.echo(
@@ -3381,12 +3401,11 @@ def findings_show(
                 indent=2,
             )
         )
-
         return
 
     print_finding_detail(
         finding
     )
-    
+
 if __name__ == "__main__":
     app()
