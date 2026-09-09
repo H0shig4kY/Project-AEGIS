@@ -11,6 +11,9 @@ from aegis.integrity_store import IntegrityStore
 from aegis.relation_store import RelationStore
 from aegis.change_store import ChangeStore
 from aegis.finding_store import FindingStore
+from aegis.finding_history_store import (
+    FindingHistoryStore,
+)
 from aegis.finding_processor import (
     FindingProcessor,
 )
@@ -48,7 +51,13 @@ class AssessmentContext:
         )
 
         self.findings = FindingStore(
-            campaign.data_dir / "findings"
+            campaign.findings_dir
+        )
+
+        self.finding_history = (
+            FindingHistoryStore(
+                campaign.finding_history_dir
+            )
         )
 
         self.finding_processor = (
@@ -57,6 +66,9 @@ class AssessmentContext:
                 relation_store=self.relations,
                 change_store=self.changes,
                 finding_store=self.findings,
+                finding_history_store=(
+                    self.finding_history
+                ),
             )
         )
 
@@ -115,6 +127,13 @@ class AssessmentContext:
     @property
     def findings_dir(self) -> Path:
         return (
-            self.campaign.data_dir
-            / "findings"
+            self.campaign.findings_dir
+        )
+
+    @property
+    def finding_history_dir(
+        self,
+    ) -> Path:
+        return (
+            self.campaign.finding_history_dir
         )

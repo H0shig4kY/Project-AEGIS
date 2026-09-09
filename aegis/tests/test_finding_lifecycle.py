@@ -8,6 +8,9 @@ from aegis.exposure import (
     ExposureFinding,
     ExposureSeverity,
 )
+from aegis.finding_history_store import (
+    FindingHistoryStore,
+)
 from aegis.finding_lifecycle import (
     FindingLifecycleManager,
 )
@@ -16,9 +19,9 @@ from aegis.finding_store import (
 )
 from aegis.models import (
     AssetType,
+    FindingEventType,
     FindingState,
 )
-
 
 def create_finding():
     return ExposureFinding(
@@ -637,4 +640,795 @@ def test_unrelated_plugin_does_not_create_finding(
     assert (
         store.find()
         == []
+    )
+
+def test_new_finding_emits_created_event(
+    tmp_path,
+):
+    store = FindingStore(
+        tmp_path / "findings"
+    )
+
+    history_store = (
+        FindingHistoryStore(
+            tmp_path
+            / "finding_history"
+        )
+    )
+
+    manager = FindingLifecycleManager(
+        store,
+        history_store,
+    )
+
+    finding = create_finding()
+
+    now = datetime(
+        2026,
+        9,
+        3,
+        10,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+    manager.process(
+        [finding],
+        observed_at=now,
+        observed_plugin="service",
+    )
+
+    events = (
+        history_store.find_by_finding_id(
+            finding.finding_id
+        )
+    )
+
+    assert len(events) == 1
+
+    event = events[0]
+
+    assert (
+        event.finding_id
+        == finding.finding_id
+    )
+
+    assert (
+        event.event_type
+        == FindingEventType.CREATED
+    )
+
+    assert (
+        event.from_state
+        is None
+    )
+
+    assert (
+        event.to_state
+        == FindingState.ACTIVE
+    )
+
+    assert (
+        event.detected_at
+        == now
+    )
+
+    assert (
+        event.plugin
+        == "service"
+    )
+
+    assert (
+        event.rule_id
+        == finding.rule_id
+    )
+
+    assert (
+        event.asset_type
+        == finding.asset_type
+    )
+
+    assert (
+        event.asset_value
+        == finding.asset_value
+    )
+
+def test_active_to_candidate_missing_emits_state_changed_event(
+    tmp_path,
+):
+    store = FindingStore(
+        tmp_path / "findings"
+    )
+
+    history_store = (
+        FindingHistoryStore(
+            tmp_path
+            / "finding_history"
+        )
+    )
+
+    manager = FindingLifecycleManager(
+        store,
+        history_store,
+    )
+
+    finding = create_finding()
+
+    first = datetime(
+        2026,
+        9,
+        3,
+        10,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+    second = (
+        first
+        + timedelta(
+            hours=1
+        )
+    )
+
+    manager.process(
+        [finding],
+        observed_at=first,
+        observed_plugin="service",
+    )
+
+    manager.process(
+        [],
+        observed_at=second,
+        observed_plugin="service",
+    )
+
+    events = (
+        history_store.find_by_finding_id(
+            finding.finding_id
+        )
+    )
+
+    assert len(events) == 2
+
+    assert (
+        events[0].event_type
+        == FindingEventType.CREATED
+    )
+
+    event = events[1]
+
+    assert (
+        event.event_type
+        == FindingEventType.STATE_CHANGED
+    )
+
+    assert (
+        event.from_state
+        == FindingState.ACTIVE
+    )
+
+    assert (
+        event.to_state
+        == FindingState.CANDIDATE_MISSING
+    )
+
+    assert (
+        event.detected_at
+        == second
+    )
+
+    assert (
+        event.plugin
+        == "service"
+    )
+
+    assert (
+        event.finding_id
+        == finding.finding_id
+    )
+
+    assert (
+        event.rule_id
+        == finding.rule_id
+    )
+
+    assert (
+        event.asset_type
+        == finding.asset_type
+    )
+
+    assert (
+        event.asset_value
+        == finding.asset_value
+    )
+
+def test_candidate_missing_to_resolved_emits_state_changed_event(
+    tmp_path,
+):
+    store = FindingStore(
+        tmp_path / "findings"
+    )
+
+    history_store = (
+        FindingHistoryStore(
+            tmp_path
+            / "finding_history"
+        )
+    )
+
+    manager = FindingLifecycleManager(
+        store,
+        history_store,
+    )
+
+    finding = create_finding()
+
+    first = datetime(
+        2026,
+        9,
+        3,
+        10,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+    second = (
+        first
+        + timedelta(
+            hours=1
+        )
+    )
+
+    third = (
+        first
+        + timedelta(
+            hours=2
+        )
+    )
+
+    manager.process(
+        [finding],
+        observed_at=first,
+        observed_plugin="service",
+    )
+
+    manager.process(
+        [],
+        observed_at=second,
+        observed_plugin="service",
+    )
+
+    manager.process(
+        [],
+        observed_at=third,
+        observed_plugin="service",
+    )
+
+    events = (
+        history_store.find_by_finding_id(
+            finding.finding_id
+        )
+    )
+
+    assert len(events) == 3
+
+    assert (
+        events[0].event_type
+        == FindingEventType.CREATED
+    )
+
+    assert (
+        events[1].event_type
+        == FindingEventType.STATE_CHANGED
+    )
+
+    event = events[2]
+
+    assert (
+        event.event_type
+        == FindingEventType.STATE_CHANGED
+    )
+
+    assert (
+        event.from_state
+        == FindingState.CANDIDATE_MISSING
+    )
+
+    assert (
+        event.to_state
+        == FindingState.RESOLVED
+    )
+
+    assert (
+        event.detected_at
+        == third
+    )
+
+    assert (
+        event.plugin
+        == "service"
+    )
+
+    assert (
+        event.finding_id
+        == finding.finding_id
+    )
+
+    assert (
+        event.rule_id
+        == finding.rule_id
+    )
+
+    assert (
+        event.asset_type
+        == finding.asset_type
+    )
+
+    assert (
+        event.asset_value
+        == finding.asset_value
+    )
+
+def test_candidate_missing_to_active_emits_state_changed_event(
+    tmp_path,
+):
+    store = FindingStore(
+        tmp_path / "findings"
+    )
+
+    history_store = (
+        FindingHistoryStore(
+            tmp_path
+            / "finding_history"
+        )
+    )
+
+    manager = FindingLifecycleManager(
+        store,
+        history_store,
+    )
+
+    finding = create_finding()
+
+    first = datetime(
+        2026,
+        9,
+        3,
+        10,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+    second = (
+        first
+        + timedelta(
+            hours=1
+        )
+    )
+
+    third = (
+        first
+        + timedelta(
+            hours=2
+        )
+    )
+
+    # None -> ACTIVE
+    manager.process(
+        [finding],
+        observed_at=first,
+        observed_plugin="service",
+    )
+
+    # ACTIVE -> CANDIDATE_MISSING
+    manager.process(
+        [],
+        observed_at=second,
+        observed_plugin="service",
+    )
+
+    # CANDIDATE_MISSING -> ACTIVE
+    manager.process(
+        [finding],
+        observed_at=third,
+        observed_plugin="service",
+    )
+
+    events = (
+        history_store.find_by_finding_id(
+            finding.finding_id
+        )
+    )
+
+    assert len(events) == 3
+
+    assert (
+        events[0].event_type
+        == FindingEventType.CREATED
+    )
+
+    assert (
+        events[1].from_state
+        == FindingState.ACTIVE
+    )
+
+    assert (
+        events[1].to_state
+        == FindingState.CANDIDATE_MISSING
+    )
+
+    event = events[2]
+
+    assert (
+        event.event_type
+        == FindingEventType.STATE_CHANGED
+    )
+
+    assert (
+        event.from_state
+        == FindingState.CANDIDATE_MISSING
+    )
+
+    assert (
+        event.to_state
+        == FindingState.ACTIVE
+    )
+
+    assert (
+        event.detected_at
+        == third
+    )
+
+    assert (
+        event.plugin
+        == "service"
+    )
+
+    assert (
+        event.finding_id
+        == finding.finding_id
+    )
+
+    assert (
+        event.rule_id
+        == finding.rule_id
+    )
+
+    assert (
+        event.asset_type
+        == finding.asset_type
+    )
+
+    assert (
+        event.asset_value
+        == finding.asset_value
+    )
+
+def test_resolved_to_active_emits_state_changed_event(
+    tmp_path,
+):
+    store = FindingStore(
+        tmp_path / "findings"
+    )
+
+    history_store = (
+        FindingHistoryStore(
+            tmp_path
+            / "finding_history"
+        )
+    )
+
+    manager = FindingLifecycleManager(
+        store,
+        history_store,
+    )
+
+    finding = create_finding()
+
+    first = datetime(
+        2026,
+        9,
+        3,
+        10,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+    second = (
+        first
+        + timedelta(
+            hours=1
+        )
+    )
+
+    third = (
+        first
+        + timedelta(
+            hours=2
+        )
+    )
+
+    fourth = (
+        first
+        + timedelta(
+            hours=3
+        )
+    )
+
+    # None -> ACTIVE
+    manager.process(
+        [finding],
+        observed_at=first,
+        observed_plugin="service",
+    )
+
+    # ACTIVE -> CANDIDATE_MISSING
+    manager.process(
+        [],
+        observed_at=second,
+        observed_plugin="service",
+    )
+
+    # CANDIDATE_MISSING -> RESOLVED
+    manager.process(
+        [],
+        observed_at=third,
+        observed_plugin="service",
+    )
+
+    # RESOLVED -> ACTIVE
+    manager.process(
+        [finding],
+        observed_at=fourth,
+        observed_plugin="service",
+    )
+
+    events = (
+        history_store.find_by_finding_id(
+            finding.finding_id
+        )
+    )
+
+    assert len(events) == 4
+
+    assert (
+        events[0].event_type
+        == FindingEventType.CREATED
+    )
+
+    assert (
+        events[1].from_state
+        == FindingState.ACTIVE
+    )
+
+    assert (
+        events[1].to_state
+        == FindingState.CANDIDATE_MISSING
+    )
+
+    assert (
+        events[2].from_state
+        == FindingState.CANDIDATE_MISSING
+    )
+
+    assert (
+        events[2].to_state
+        == FindingState.RESOLVED
+    )
+
+    event = events[3]
+
+    assert (
+        event.event_type
+        == FindingEventType.STATE_CHANGED
+    )
+
+    assert (
+        event.from_state
+        == FindingState.RESOLVED
+    )
+
+    assert (
+        event.to_state
+        == FindingState.ACTIVE
+    )
+
+    assert (
+        event.detected_at
+        == fourth
+    )
+
+    assert (
+        event.plugin
+        == "service"
+    )
+
+    assert (
+        event.finding_id
+        == finding.finding_id
+    )
+
+    assert (
+        event.rule_id
+        == finding.rule_id
+    )
+
+    assert (
+        event.asset_type
+        == finding.asset_type
+    )
+
+    assert (
+        event.asset_value
+        == finding.asset_value
+    )
+
+def test_active_to_active_does_not_emit_state_changed_event(
+    tmp_path,
+):
+    store = FindingStore(
+        tmp_path / "findings"
+    )
+
+    history_store = (
+        FindingHistoryStore(
+            tmp_path
+            / "finding_history"
+        )
+    )
+
+    manager = FindingLifecycleManager(
+        store,
+        history_store,
+    )
+
+    finding = create_finding()
+
+    first = datetime(
+        2026,
+        9,
+        3,
+        10,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+    second = (
+        first
+        + timedelta(
+            hours=1
+        )
+    )
+
+    # None -> ACTIVE
+    manager.process(
+        [finding],
+        observed_at=first,
+        observed_plugin="service",
+    )
+
+    # ACTIVE -> ACTIVE
+    manager.process(
+        [finding],
+        observed_at=second,
+        observed_plugin="service",
+    )
+
+    events = (
+        history_store.find_by_finding_id(
+            finding.finding_id
+        )
+    )
+
+    assert len(events) == 1
+
+    event = events[0]
+
+    assert (
+        event.event_type
+        == FindingEventType.CREATED
+    )
+
+    assert event.from_state is None
+
+    assert (
+        event.to_state
+        == FindingState.ACTIVE
+    )
+
+    assert (
+        event.detected_at
+        == first
+    )
+
+def test_unrelated_plugin_does_not_emit_history_event(
+    tmp_path,
+):
+    store = FindingStore(
+        tmp_path / "findings"
+    )
+
+    history_store = (
+        FindingHistoryStore(
+            tmp_path
+            / "finding_history"
+        )
+    )
+
+    manager = FindingLifecycleManager(
+        store,
+        history_store,
+    )
+
+    finding = create_finding()
+
+    first = datetime(
+        2026,
+        9,
+        3,
+        10,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+    second = (
+        first
+        + timedelta(
+            hours=1
+        )
+    )
+
+    # Relevant plugin creates the finding.
+    manager.process(
+        [finding],
+        observed_at=first,
+        observed_plugin="service",
+    )
+
+    events_before = (
+        history_store.find_by_finding_id(
+            finding.finding_id
+        )
+    )
+
+    assert len(events_before) == 1
+
+    # DNS is unrelated to this finding's
+    # coverage_plugins.
+    manager.process(
+        [],
+        observed_at=second,
+        observed_plugin="dns",
+    )
+
+    events_after = (
+        history_store.find_by_finding_id(
+            finding.finding_id
+        )
+    )
+
+    assert len(events_after) == 1
+
+    event = events_after[0]
+
+    assert (
+        event.event_type
+        == FindingEventType.CREATED
+    )
+
+    assert event.from_state is None
+
+    assert (
+        event.to_state
+        == FindingState.ACTIVE
+    )
+
+    assert (
+        event.detected_at
+        == first
+    )
+
+    assert (
+        event.plugin
+        == "service"
     )

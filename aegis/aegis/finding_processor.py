@@ -27,6 +27,7 @@ class FindingProcessor:
         relation_store,
         change_store,
         finding_store,
+        finding_history_store=None,
     ):
         self.asset_store = (
             asset_store
@@ -44,13 +45,18 @@ class FindingProcessor:
             finding_store
         )
 
+        self.finding_history_store = (
+            finding_history_store
+        )
+
         self.analyzer = (
             ExposureAnalyzer()
         )
 
         self.lifecycle = (
             FindingLifecycleManager(
-                finding_store
+                finding_store,
+                finding_history_store,
             )
         )
 

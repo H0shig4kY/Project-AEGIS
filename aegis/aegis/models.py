@@ -308,6 +308,13 @@ class FindingState(
     CANDIDATE_MISSING = "candidate_missing"
     RESOLVED = "resolved"
 
+class FindingEventType(
+    str,
+    Enum,
+):
+    CREATED = "created"
+    STATE_CHANGED = "state_changed"
+
 @dataclass
 class FindingRecord:
     finding_id: str
@@ -340,3 +347,41 @@ class FindingRecord:
     missing_count: int = 0
 
     active: bool = True
+
+@dataclass
+class FindingEvent:
+    event_id: str
+
+    finding_id: str
+
+    event_type: FindingEventType
+
+    from_state: FindingState | None
+    to_state: FindingState
+
+    detected_at: datetime
+
+    plugin: str | None = None
+
+    rule_id: str | None = None
+    asset_type: AssetType | None = None
+    asset_value: str | None = None
+
+    @property
+    def identity(
+        self,
+    ) -> str:
+        return "|".join(
+            [
+                self.finding_id,
+                self.event_type.value,
+                (
+                    self.from_state.value
+                    if self.from_state
+                    else ""
+                ),
+                self.to_state.value,
+                self.detected_at.isoformat(),
+                self.plugin or "",
+            ]
+        )

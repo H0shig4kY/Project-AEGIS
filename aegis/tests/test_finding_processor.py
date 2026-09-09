@@ -22,6 +22,11 @@ from aegis.models import (
     Asset,
     AssetType,
     FindingState,
+    FindingEventType,
+)
+
+from aegis.finding_history_store import (
+    FindingHistoryStore,
 )
 
 
@@ -344,3 +349,108 @@ def test_processor_ignores_missing_for_unrelated_plugin(
     )
 
     assert record.missing_count == 0
+
+def test_finding_processor_persists_history_event(
+    tmp_path,
+):
+    assets = AssetStore(
+        tmp_path / "assets"
+    )
+
+    relations = RelationStore(
+        tmp_path / "relations"
+    )
+
+    changes = ChangeStore(
+        tmp_path / "changes"
+    )
+
+    findings = FindingStore(
+        tmp_path / "findings"
+    )
+
+    history = FindingHistoryStore(
+        tmp_path / "finding_history"
+    )
+
+    assets.save(
+        Asset(
+            type=AssetType.SERVICE,
+            value="example.com:80",
+            source="service",
+            metadata={
+                "service_name": "http",
+                "port": 80,
+                "transport": "tcp",
+            },
+        )
+    )
+
+    processor = FindingProcessor(
+        asset_store=assets,
+        relation_store=relations,
+        change_store=changes,
+        finding_store=findings,
+        finding_history_store=history,
+    )
+
+    observed_at = datetime(
+        2026,
+        9,
+        3,
+        10,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+    report = processor.process(
+        observed_at=observed_at,
+        observed_plugin="service",
+    )
+
+    assert len(
+        report.findings
+    ) == 1
+
+    events = history.find()
+
+    assert len(events) == 1
+
+    event = events[0]
+
+    assert (
+        event.event_type
+        == FindingEventType.CREATED
+    )
+
+    assert event.from_state is None
+
+    assert (
+        event.to_state
+        == FindingState.ACTIVE
+    )
+
+    assert (
+        event.detected_at
+        == observed_at
+    )
+
+    assert (
+        event.plugin
+        == "service"
+    )
+
+    assert (
+        event.rule_id
+        == "HTTP_WITHOUT_TLS"
+    )
+
+    assert (
+        event.asset_type
+        == AssetType.SERVICE
+    )
+
+    assert (
+        event.asset_value
+        == "example.com:80"
+    )

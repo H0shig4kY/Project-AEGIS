@@ -3,6 +3,9 @@ from pathlib import Path
 from aegis.assessment import AssessmentContext
 from aegis.context import CampaignContext
 from aegis.finding_store import FindingStore
+from aegis.finding_history_store import (
+    FindingHistoryStore,
+)
 
 def test_assessment_context(tmp_path: Path):
     campaign = tmp_path / "campaign"
@@ -247,4 +250,76 @@ def test_assessment_context_has_finding_processor(
     assert (
         context.finding_processor.change_store
         is context.changes
+    )
+
+def test_assessment_context_has_finding_history_store(
+    tmp_path,
+):
+    campaign = tmp_path / "campaign"
+    campaign.mkdir()
+
+    (
+        campaign
+        / "aegis.yaml"
+    ).write_text(
+        "name: test\n",
+        encoding="utf-8",
+    )
+
+    context = AssessmentContext(
+        CampaignContext(
+            campaign
+        )
+    )
+
+    assert isinstance(
+        context.finding_history,
+        FindingHistoryStore,
+    )
+
+    assert (
+        context.finding_history_dir
+        == (
+            campaign
+            / "data"
+            / "finding_history"
+        )
+    )
+
+    assert (
+        context.finding_history.directory
+        == (
+            campaign
+            / "data"
+            / "finding_history"
+        )
+    )
+
+    assert (
+        context.finding_history.find()
+        == []
+    )
+    
+def test_assessment_context_connects_finding_history_to_processor(
+    tmp_path,
+):
+    campaign = CampaignContext(
+        tmp_path
+    )
+
+    context = AssessmentContext(
+        campaign
+    )
+
+    assert (
+        context.finding_processor
+        .finding_history_store
+        is context.finding_history
+    )
+
+    assert (
+        context.finding_processor
+        .lifecycle
+        .history_store
+        is context.finding_history
     )

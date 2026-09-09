@@ -22,6 +22,7 @@ from aegis.context import (
 from aegis.models import (
     Asset,
     AssetType,
+    FindingState,
 )
 
 
@@ -50,6 +51,45 @@ def create_context(
         CampaignContext(
             campaign
         )
+    )
+
+def create_finding_with_history(
+    context,
+):
+    context.assets.save(
+        Asset(
+            type=AssetType.SERVICE,
+            value="example.com:80",
+            source="service",
+            metadata={
+                "service_name": "http",
+                "port": 80,
+                "transport": "tcp",
+            },
+        )
+    )
+
+    observed_at = datetime(
+        2026,
+        9,
+        3,
+        10,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+    context.finding_processor.process(
+        observed_at=observed_at,
+        observed_plugin="service",
+    )
+
+    finding = (
+        context.findings.find()[0]
+    )
+
+    return (
+        finding,
+        observed_at,
     )
 
 
@@ -687,4 +727,669 @@ def test_findings_show_not_found(
     assert (
         "finding not found"
         in result.output
+    )
+
+def test_findings_history_shows_events(
+    tmp_path,
+    monkeypatch,
+):
+    context = create_context(
+        tmp_path
+    )
+
+    (
+        finding,
+        observed_at,
+    ) = create_finding_with_history(
+        context
+    )
+
+    monkeypatch.chdir(
+        context.root
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "findings",
+            "history",
+            finding.finding_id,
+        ],
+    )
+
+    assert result.exit_code == 0
+
+    assert (
+        "Finding history"
+        in result.output
+    )
+
+    assert (
+        finding.finding_id
+        in result.output
+    )
+
+    assert (
+        "HTTP_WITHOUT_TLS"
+        in result.output
+    )
+
+    assert (
+        "CREATED"
+        in result.output
+    )
+
+    assert (
+        "ACTIVE"
+        in result.output
+    )
+
+    assert (
+        observed_at.isoformat()
+        in result.output
+    )
+
+    assert (
+        "service"
+        in result.output
+    )
+
+def test_findings_history_accepts_unique_id_prefix(
+    tmp_path,
+    monkeypatch,
+):
+    context = create_context(
+        tmp_path
+    )
+
+    (
+        finding,
+        _,
+    ) = create_finding_with_history(
+        context
+    )
+
+    monkeypatch.chdir(
+        context.root
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "findings",
+            "history",
+            finding.finding_id[:12],
+        ],
+    )
+
+    assert result.exit_code == 0
+
+    assert (
+        finding.finding_id
+        in result.output
+    )
+
+    assert (
+        "CREATED"
+        in result.output
+    )
+
+def test_findings_history_json(
+    tmp_path,
+    monkeypatch,
+):
+    context = create_context(
+        tmp_path
+    )
+
+    (
+        finding,
+        observed_at,
+    ) = create_finding_with_history(
+        context
+    )
+
+    monkeypatch.chdir(
+        context.root
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "findings",
+            "history",
+            finding.finding_id,
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0
+
+    payload = json.loads(
+        result.output
+    )
+
+    assert (
+        payload["finding"]["id"]
+        == finding.finding_id
+    )
+
+    assert (
+        payload["finding"]["rule_id"]
+        == "HTTP_WITHOUT_TLS"
+    )
+
+    assert (
+        payload["finding"]["state"]
+        == "active"
+    )
+
+    assert len(
+        payload["timeline"]
+    ) == 1
+
+    event = (
+        payload["timeline"][0]
+    )
+
+    assert (
+        event["event_type"]
+        == "created"
+    )
+
+    assert (
+        event["from_state"]
+        is None
+    )
+
+    assert (
+        event["to_state"]
+        == "active"
+    )
+
+    assert (
+        event["detected_at"]
+        == observed_at.isoformat()
+    )
+
+    assert (
+        event["plugin"]
+        == "service"
+    )
+
+    assert (
+        event["rule_id"]
+        == "HTTP_WITHOUT_TLS"
+    )
+
+    assert (
+        event["asset_type"]
+        == "service"
+    )
+
+    assert (
+        event["asset_value"]
+        == "example.com:80"
+    )
+
+def test_findings_history_finding_not_found(
+    tmp_path,
+    monkeypatch,
+):
+    context = create_context(
+        tmp_path
+    )
+
+    monkeypatch.chdir(
+        context.root
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "findings",
+            "history",
+            "does-not-exist",
+        ],
+    )
+
+    assert result.exit_code == 1
+
+    assert (
+        "finding not found"
+        in result.output
+    )
+
+def test_findings_history_shows_complete_lifecycle_timeline(
+    tmp_path,
+    monkeypatch,
+):
+    context = create_context(
+        tmp_path
+    )
+
+    # -------------------------------------------------
+    # 1. CREATE
+    # None -> ACTIVE
+    # -------------------------------------------------
+
+    asset = Asset(
+        type=AssetType.SERVICE,
+        value="example.com:80",
+        source="service",
+        metadata={
+            "service_name": "http",
+            "port": 80,
+            "transport": "tcp",
+        },
+        active=True,
+    )
+
+    context.assets.save(
+        asset
+    )
+
+    created_at = datetime(
+        2026,
+        9,
+        3,
+        10,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+    context.finding_processor.process(
+        observed_at=created_at,
+        observed_plugin="service",
+    )
+
+    finding = (
+        context.findings.find()[0]
+    )
+
+    # -------------------------------------------------
+    # 2. FIRST MISSING
+    # ACTIVE -> CANDIDATE_MISSING
+    # -------------------------------------------------
+
+    context.assets.set_active(
+        AssetType.SERVICE,
+        "example.com:80",
+        False,
+    )
+
+    candidate_at = datetime(
+        2026,
+        9,
+        3,
+        11,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+    context.finding_processor.process(
+        observed_at=candidate_at,
+        observed_plugin="service",
+    )
+
+    # -------------------------------------------------
+    # 3. SECOND MISSING
+    # CANDIDATE_MISSING -> RESOLVED
+    # -------------------------------------------------
+
+    resolved_at = datetime(
+        2026,
+        9,
+        3,
+        12,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+    context.finding_processor.process(
+        observed_at=resolved_at,
+        observed_plugin="service",
+    )
+
+    # -------------------------------------------------
+    # 4. REAPPEARANCE
+    # RESOLVED -> ACTIVE
+    # -------------------------------------------------
+
+    context.assets.set_active(
+        AssetType.SERVICE,
+        "example.com:80",
+        True,
+    )
+
+    reactivated_at = datetime(
+        2026,
+        9,
+        3,
+        13,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+    context.finding_processor.process(
+        observed_at=reactivated_at,
+        observed_plugin="service",
+    )
+
+    reactivated_finding = (
+        context.findings.get(
+            finding.finding_id
+        )
+    )
+
+    assert (
+        reactivated_finding
+        is not None
+    )
+
+    assert (
+        reactivated_finding.state
+        == FindingState.ACTIVE
+    )
+
+    assert (
+        reactivated_finding.active
+        is True
+    )
+
+    # -------------------------------------------------
+    # CLI
+    # -------------------------------------------------
+
+    monkeypatch.chdir(
+        context.root
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "findings",
+            "history",
+            finding.finding_id,
+        ],
+    )
+
+    assert result.exit_code == 0
+
+    # -------------------------------------------------
+    # EVENTS
+    # -------------------------------------------------
+
+    assert (
+        "CREATED NONE -> ACTIVE"
+        in result.output
+    )
+
+    assert (
+        "STATE_CHANGED "
+        "ACTIVE -> CANDIDATE_MISSING"
+        in result.output
+    )
+
+    assert (
+        "STATE_CHANGED "
+        "CANDIDATE_MISSING -> RESOLVED"
+        in result.output
+    )
+
+    assert (
+        "STATE_CHANGED "
+        "RESOLVED -> ACTIVE"
+        in result.output
+    )
+
+    # -------------------------------------------------
+    # CHRONOLOGICAL ORDER
+    # -------------------------------------------------
+
+    created_position = (
+        result.output.index(
+            "CREATED NONE -> ACTIVE"
+        )
+    )
+
+    candidate_position = (
+        result.output.index(
+            "ACTIVE -> CANDIDATE_MISSING"
+        )
+    )
+
+    resolved_position = (
+        result.output.index(
+            "CANDIDATE_MISSING -> RESOLVED"
+        )
+    )
+
+    reactivated_position = (
+        result.output.index(
+            "RESOLVED -> ACTIVE"
+        )
+    )
+
+    assert (
+        created_position
+        < candidate_position
+        < resolved_position
+        < reactivated_position
+    )
+
+def test_findings_history_json_complete_lifecycle_timeline(
+    tmp_path,
+    monkeypatch,
+):
+    context = create_context(
+        tmp_path
+    )
+
+    # -------------------------------------------------
+    # 1. CREATE
+    # None -> ACTIVE
+    # -------------------------------------------------
+
+    context.assets.save(
+        Asset(
+            type=AssetType.SERVICE,
+            value="example.com:80",
+            source="service",
+            metadata={
+                "service_name": "http",
+                "port": 80,
+                "transport": "tcp",
+            },
+            active=True,
+        )
+    )
+
+    created_at = datetime(
+        2026,
+        9,
+        3,
+        10,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+    context.finding_processor.process(
+        observed_at=created_at,
+        observed_plugin="service",
+    )
+
+    finding = (
+        context.findings.find()[0]
+    )
+
+    # -------------------------------------------------
+    # 2. ACTIVE -> CANDIDATE_MISSING
+    # -------------------------------------------------
+
+    context.assets.set_active(
+        AssetType.SERVICE,
+        "example.com:80",
+        False,
+    )
+
+    candidate_at = datetime(
+        2026,
+        9,
+        3,
+        11,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+    context.finding_processor.process(
+        observed_at=candidate_at,
+        observed_plugin="service",
+    )
+
+    # -------------------------------------------------
+    # 3. CANDIDATE_MISSING -> RESOLVED
+    # -------------------------------------------------
+
+    resolved_at = datetime(
+        2026,
+        9,
+        3,
+        12,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+    context.finding_processor.process(
+        observed_at=resolved_at,
+        observed_plugin="service",
+    )
+
+    # -------------------------------------------------
+    # 4. RESOLVED -> ACTIVE
+    # -------------------------------------------------
+
+    context.assets.set_active(
+        AssetType.SERVICE,
+        "example.com:80",
+        True,
+    )
+
+    reactivated_at = datetime(
+        2026,
+        9,
+        3,
+        13,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+    context.finding_processor.process(
+        observed_at=reactivated_at,
+        observed_plugin="service",
+    )
+
+    # -------------------------------------------------
+    # CLI JSON
+    # -------------------------------------------------
+
+    monkeypatch.chdir(
+        context.root
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "findings",
+            "history",
+            finding.finding_id,
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0
+
+    payload = json.loads(
+        result.output
+    )
+
+    # -------------------------------------------------
+    # CURRENT FINDING
+    # -------------------------------------------------
+
+    assert (
+        payload["finding"]["id"]
+        == finding.finding_id
+    )
+
+    assert (
+        payload["finding"]["state"]
+        == "active"
+    )
+
+    assert (
+        payload["finding"]["active"]
+        is True
+    )
+
+    # -------------------------------------------------
+    # COMPLETE TIMELINE
+    # -------------------------------------------------
+
+    timeline = (
+        payload["timeline"]
+    )
+
+    assert len(timeline) == 4
+
+    transitions = [
+        (
+            event["event_type"],
+            event["from_state"],
+            event["to_state"],
+        )
+        for event in timeline
+    ]
+
+    assert transitions == [
+        (
+            "created",
+            None,
+            "active",
+        ),
+        (
+            "state_changed",
+            "active",
+            "candidate_missing",
+        ),
+        (
+            "state_changed",
+            "candidate_missing",
+            "resolved",
+        ),
+        (
+            "state_changed",
+            "resolved",
+            "active",
+        ),
+    ]
+
+    # -------------------------------------------------
+    # TIMESTAMPS
+    # -------------------------------------------------
+
+    assert [
+        event["detected_at"]
+        for event in timeline
+    ] == [
+        created_at.isoformat(),
+        candidate_at.isoformat(),
+        resolved_at.isoformat(),
+        reactivated_at.isoformat(),
+    ]
+
+    # All transitions were driven by service coverage.
+    assert all(
+        event["plugin"] == "service"
+        for event in timeline
     )

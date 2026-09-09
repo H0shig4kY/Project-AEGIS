@@ -3407,5 +3407,201 @@ def findings_show(
         finding
     )
 
+@findings_app.command("history")
+def findings_history(
+    finding_id: str = typer.Argument(
+        ...,
+        help="Finding ID or unique ID prefix.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Output finding history as JSON.",
+    ),
+):
+    """Show the lifecycle history of a persisted finding."""
+
+    campaign = find_campaign()
+
+    if campaign is None:
+        print_error(
+            "no AEGIS / ARGUS campaign found."
+        )
+        raise typer.Exit(code=1)
+
+    context = AssessmentContext(
+        campaign
+    )
+
+    finding = context.findings.find_by_id(
+        finding_id
+    )
+
+    if finding is None:
+        print_error(
+            f"finding not found: {finding_id}"
+        )
+        raise typer.Exit(code=1)
+
+    events = (
+        context.finding_history
+        .find_by_finding_id(
+            finding.finding_id
+        )
+    )
+
+    # -------------------------------------------------
+    # JSON
+    # -------------------------------------------------
+
+    if json_output:
+        payload = {
+            "finding": {
+                "id": (
+                    finding.finding_id
+                ),
+                "rule_id": (
+                    finding.rule_id
+                ),
+                "severity": (
+                    finding.severity
+                ),
+                "state": (
+                    finding.state.value
+                ),
+                "active": (
+                    finding.active
+                ),
+                "title": (
+                    finding.title
+                ),
+                "asset_type": (
+                    finding.asset_type.value
+                ),
+                "asset_value": (
+                    finding.asset_value
+                ),
+            },
+            "timeline": [
+                {
+                    "event_id": (
+                        event.event_id
+                    ),
+                    "event_type": (
+                        event.event_type.value
+                    ),
+                    "from_state": (
+                        event.from_state.value
+                        if event.from_state
+                        else None
+                    ),
+                    "to_state": (
+                        event.to_state.value
+                    ),
+                    "detected_at": (
+                        event.detected_at
+                        .isoformat()
+                    ),
+                    "plugin": (
+                        event.plugin
+                    ),
+                    "rule_id": (
+                        event.rule_id
+                    ),
+                    "asset_type": (
+                        event.asset_type.value
+                        if event.asset_type
+                        else None
+                    ),
+                    "asset_value": (
+                        event.asset_value
+                    ),
+                }
+                for event in events
+            ],
+        }
+
+        typer.echo(
+            json.dumps(
+                payload,
+                indent=2,
+            )
+        )
+
+        return
+
+    # -------------------------------------------------
+    # HUMAN-READABLE
+    # -------------------------------------------------
+
+    typer.echo("ARGUS")
+    typer.echo("")
+    typer.echo("Finding history")
+    typer.echo("")
+
+    typer.echo(
+        f"ID: {finding.finding_id}"
+    )
+
+    typer.echo(
+        f"Rule: {finding.rule_id}"
+    )
+
+    typer.echo(
+        f"Severity: {finding.severity}"
+    )
+
+    typer.echo(
+        f"State: "
+        f"{finding.state.value}"
+    )
+
+    typer.echo(
+        f"Active: "
+        f"{'yes' if finding.active else 'no'}"
+    )
+
+    typer.echo(
+        f"Asset: "
+        f"{finding.asset_type.value} "
+        f"{finding.asset_value}"
+    )
+
+    typer.echo("")
+    typer.echo("Timeline")
+
+    if not events:
+        typer.echo(
+            "  No history found."
+        )
+        return
+
+    for event in events:
+        from_state = (
+            event.from_state.value.upper()
+            if event.from_state
+            else "NONE"
+        )
+
+        to_state = (
+            event.to_state.value.upper()
+        )
+
+        line = (
+            f"  "
+            f"{event.detected_at.isoformat()} "
+            f"{event.event_type.value.upper()} "
+            f"{from_state} -> {to_state}"
+        )
+
+        if event.plugin:
+            line += (
+                f" [{event.plugin}]"
+            )
+
+        typer.echo(
+            line
+        )
+
 if __name__ == "__main__":
     app()

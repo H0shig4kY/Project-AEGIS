@@ -18,6 +18,20 @@ class CampaignContext:
         return self.path / "data"
 
     @property
+    def findings_dir(self) -> Path:
+        return (
+            self.data_dir
+            / "findings"
+        )
+
+    @property
+    def finding_history_dir(self) -> Path:
+        return (
+            self.data_dir
+            / "finding_history"
+        )
+
+    @property
     def evidence_dir(self) -> Path:
         return self.path / "evidence"
 
