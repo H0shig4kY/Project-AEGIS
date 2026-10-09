@@ -46,7 +46,7 @@ def test_command_help_without_campaign(tmp_path, monkeypatch, operation):
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(app, ['findings', operation, '--help'])
     assert result.exit_code == 0
-    assert '--json' in result.output and 'FINDING_ID' in result.output
+    assert '--json' in result.output and 'finding_id' in result.output.lower()
     if operation in OPS:
         assert '--actor' in result.output and '--reason' in result.output
 
@@ -184,3 +184,28 @@ def test_corrupt_audit_clean_error(campaign):
     result = invoke('triage-history', record.finding_id, '--json')
     assert result.exit_code == 1 and result.stdout == ''
     assert 'Traceback' not in result.output and result.stderr
+
+
+def test_storage_failure_is_clean_and_nonzero(campaign, monkeypatch):
+    _, record = campaign
+    from aegis.finding_triage_history_store import FindingTriageHistoryStore
+    def fail(self, event):
+        raise OSError('audit unavailable')
+    monkeypatch.setattr(FindingTriageHistoryStore, 'save', fail)
+    result = invoke('acknowledge', record.finding_id, '--json')
+    assert result.exit_code == 1 and result.stdout == ''
+    assert 'audit unavailable' in result.stderr and 'Traceback' not in result.output
+
+
+def test_legacy_json_and_unicode(campaign):
+    context, record = campaign
+    path = context.findings.path / f'{record.finding_id}.json'
+    payload = json.loads(path.read_text())
+    payload.pop('triage_state')
+    path.write_text(json.dumps(payload))
+    result = runner.invoke(app, ['findings', 'acknowledge', record.finding_id,
+        '--actor', 'João', '--reason', 'Evidência revista', '--json'])
+    assert result.exit_code == 0
+    history = json.loads(invoke('triage-history', record.finding_id, '--json').stdout)
+    assert history['timeline'][0]['actor'] == 'João'
+    assert history['timeline'][0]['reason'] == 'Evidência revista'

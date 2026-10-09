@@ -5,9 +5,11 @@ from datetime import (
 from pathlib import Path
 
 import json
+import re
 import typer
 
 from aegis.assessment import AssessmentContext
+from aegis.finding_triage import FindingTriageManager
 from aegis.change_engine import ChangeEngine
 from aegis.change_history import (
     find_previous_comparable_result,
@@ -120,7 +122,7 @@ results_app = typer.Typer(
 )
 
 findings_app = typer.Typer(
-    help="Inspect current exposure findings."
+    help="Inspect exposure findings and manage operational triage."
 )
 
 app.add_typer(
@@ -3602,6 +3604,123 @@ def findings_history(
         typer.echo(
             line
         )
+
+def _triage_error(message: str) -> None:
+    # Plain stderr keeps stdout suitable for JSON pipelines.
+    typer.echo(f"Error: {message}", err=True)
+    raise typer.Exit(code=1)
+
+
+def _triage_context() -> AssessmentContext:
+    campaign = find_campaign()
+    if campaign is None:
+        raise LookupError("no AEGIS / ARGUS campaign found.")
+    return AssessmentContext(campaign)
+
+
+def _triage_finding_payload(finding) -> dict:
+    return {
+        "id": finding.finding_id,
+        "state": finding.state.value,
+        "triage_state": finding.triage_state.value,
+        "active": finding.active,
+    }
+
+
+def _change_finding_triage(
+    operation: str, finding_id: str, actor: str, reason: str, json_output: bool,
+) -> None:
+    try:
+        context = _triage_context()
+        manager = FindingTriageManager(context.findings, context.finding_triage_history)
+        finding = getattr(manager, operation)(finding_id, actor=actor, reason=reason)
+    except (ValueError, LookupError, OSError, TypeError) as error:
+        _triage_error(str(error))
+    if json_output:
+        typer.echo(json.dumps(_triage_finding_payload(finding), indent=2, sort_keys=True))
+    else:
+        typer.echo(f"Finding {finding.finding_id}: triage_state={finding.triage_state.value}")
+
+
+@findings_app.command("acknowledge")
+def findings_acknowledge(
+    finding_id: str = typer.Argument(..., help="Complete lowercase SHA-256 finding ID."),
+    actor: str = typer.Option(..., "--actor", help="Operator identity."),
+    reason: str = typer.Option(..., "--reason", help="Reason for this transition."),
+    json_output: bool = typer.Option(False, "--json", help="Output persisted state as JSON."),
+):
+    """Acknowledge an OPEN finding without changing its technical state."""
+    _change_finding_triage("acknowledge", finding_id, actor, reason, json_output)
+
+
+@findings_app.command("suppress")
+def findings_suppress(
+    finding_id: str = typer.Argument(..., help="Complete lowercase SHA-256 finding ID."),
+    actor: str = typer.Option(..., "--actor", help="Operator identity."),
+    reason: str = typer.Option(..., "--reason", help="Reason for this transition."),
+    json_output: bool = typer.Option(False, "--json", help="Output persisted state as JSON."),
+):
+    """Suppress an OPEN or ACKNOWLEDGED finding."""
+    _change_finding_triage("suppress", finding_id, actor, reason, json_output)
+
+
+@findings_app.command("unsuppress")
+def findings_unsuppress(
+    finding_id: str = typer.Argument(..., help="Complete lowercase SHA-256 finding ID."),
+    actor: str = typer.Option(..., "--actor", help="Operator identity."),
+    reason: str = typer.Option(..., "--reason", help="Reason for this transition."),
+    json_output: bool = typer.Option(False, "--json", help="Output persisted state as JSON."),
+):
+    """Reopen a SUPPRESSED finding's operational triage state."""
+    _change_finding_triage("unsuppress", finding_id, actor, reason, json_output)
+
+
+@findings_app.command("triage-history")
+def findings_triage_history(
+    finding_id: str = typer.Argument(..., help="Complete lowercase SHA-256 finding ID."),
+    json_output: bool = typer.Option(False, "--json", help="Output operational history as JSON."),
+):
+    """Show operational audit events in chronological order."""
+    try:
+        context = _triage_context()
+        normalized = finding_id.strip()
+        if not re.fullmatch(r"[0-9a-f]{64}", normalized):
+            raise ValueError("finding_id must be a complete lowercase SHA-256 hex ID")
+        finding = context.findings.get(normalized)
+        if finding is None:
+            raise LookupError(f"Finding not found: {normalized}")
+        events = context.finding_triage_history.find_by_finding_id(finding.finding_id)
+        timeline = [
+            {
+                "event_id": event.event_id,
+                "finding_id": event.finding_id,
+                "event_type": event.event_type.value,
+                "from_state": event.from_state.value,
+                "to_state": event.to_state.value,
+                "detected_at": event.detected_at.isoformat(),
+                "actor": event.actor,
+                "reason": event.reason,
+            }
+            for event in events
+        ]
+    except (ValueError, LookupError, OSError, TypeError) as error:
+        _triage_error(str(error))
+    if json_output:
+        typer.echo(json.dumps(
+            {"finding": _triage_finding_payload(finding), "timeline": timeline},
+            indent=2, sort_keys=True,
+        ))
+        return
+    if not events:
+        typer.echo("No triage history found.")
+        return
+    for event in events:
+        typer.echo(
+            f"{event.detected_at.isoformat()} {event.event_type.value} "
+            f"{event.from_state.value} -> {event.to_state.value} "
+            f"actor={event.actor} reason={event.reason}"
+        )
+
 
 if __name__ == "__main__":
     app()

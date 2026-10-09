@@ -2,7 +2,7 @@
 
 `FindingTriageManager` changes only `FindingRecord.triage_state`. It does not
 change technical `state`, activity, counters, evidence or technical history.
-No CLI commands are introduced by this sprint.
+Operational triage is also available through the CLI described below.
 
 ```python
 from pathlib import Path
@@ -72,3 +72,43 @@ Tests were committed before implementation and initially failed with
 matrix, input validation, missing findings, repeated operations, reopening stores,
 event fields/order, legacy JSON, technical lifecycle independence, timestamp
 collisions, write failures and audit corruption.
+
+
+## CLI usage
+
+Run inside a campaign containing `aegis.yaml`, or any of its subdirectories.
+Use the complete lowercase 64-character finding ID. Existing `findings show`
+and technical `findings history` retain their existing prefix behavior.
+
+```bash
+aegis findings acknowledge <finding-id> --actor "Carlos" --reason "Evidence reviewed"
+aegis findings suppress <finding-id> --actor "Carlos" --reason "Accepted exposure" --json
+aegis findings unsuppress <finding-id> --actor "Carlos" --reason "Reassessment needed" --json
+aegis findings triage-history <finding-id> --json
+```
+
+`--json` is available on all four commands. State changes emit a single object:
+
+```json
+{"id": "<full finding ID>", "state": "active", "triage_state": "suppressed", "active": true}
+```
+
+`state` and `active` describe technical detection; reopening operational triage
+does not reactivate a technically resolved finding.
+
+History emits `{ "finding": <same state object>, "timeline": [...] }`. Each
+entry has `event_id`, `finding_id`, `event_type`, `from_state`, `to_state`,
+`detected_at`, `actor` and `reason`. An existing finding without operational
+events returns an empty timeline and exit code 0. Without `--json`, history
+prints timestamps, operations, previous/next states, actors and reasons.
+
+Successful JSON output contains no banners or success messages. Normal command
+errors go to stderr with exit code 1 and no JSON on stdout. Missing required
+arguments/options are handled by Typer with exit code 2. Missing campaigns,
+unknown findings, invalid parameters/transitions, storage failures and malformed
+audit data produce concise errors without stack traces.
+
+The CLI discovers the assessment through the existing campaign lookup and stores
+operational events in `<campaign>/data/finding_triage_history/`, separate from
+`data/findings/` and technical `data/finding_history/`. It delegates changes to
+`FindingTriageManager` and preserves the existing persisted formats.

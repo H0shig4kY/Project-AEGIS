@@ -11,6 +11,7 @@ from aegis.integrity_store import IntegrityStore
 from aegis.relation_store import RelationStore
 from aegis.change_store import ChangeStore
 from aegis.finding_store import FindingStore
+from aegis.finding_triage_history_store import FindingTriageHistoryStore
 from aegis.finding_history_store import (
     FindingHistoryStore,
 )
@@ -58,6 +59,10 @@ class AssessmentContext:
             FindingHistoryStore(
                 campaign.finding_history_dir
             )
+        )
+
+        self.finding_triage_history = FindingTriageHistoryStore(
+            campaign.finding_triage_history_dir
         )
 
         self.finding_processor = (
