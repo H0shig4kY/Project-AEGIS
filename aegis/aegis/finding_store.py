@@ -41,17 +41,10 @@ class FindingStore:
     @contextmanager
     def transaction(self):
         """Cooperative finding read/modify/write scope with journal recovery."""
-        with directory_lock(self.path) as nested:
-            if nested:
+        with directory_lock(self.path):
+            from aegis.triage_journal import transaction_view
+            with transaction_view(self):
                 yield
-                return
-            try:
-                from aegis.triage_journal import recover
-                recover(self)
-                yield
-            finally:
-                # A failed recovery/publication must not leak a transaction view.
-                self._triage_view = None
 
     def save(self, record: FindingRecord) -> Path:
         with self.transaction():

@@ -3,6 +3,8 @@
 import json
 import os
 import re
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 from aegis.atomic_storage import atomic_write_text, read_json, sync_directory, StorageIntegrityError
@@ -40,6 +42,43 @@ class _View:
             for _, data in entries:
                 self.latest[data["event"]["finding_id"]] = data
                 self.sequence = max(self.sequence, data["sequence"])
+
+
+_scopes = threading.local()
+
+
+@contextmanager
+def transaction_view(store):
+    """Share the view across store instances under the same directory lock.
+
+    A caught nested failure invalidates the scope, so the next public operation
+    recovers source files before reusing any view. Caller holds directory_lock.
+    """
+    if getattr(_scopes, "pid", None) != os.getpid():
+        _scopes.pid = os.getpid()
+        _scopes.active = {}
+    key = os.path.normcase(str(store.path.resolve()))
+    active = _scopes.active
+    scope = active.get(key)
+    owner = scope is None
+    if owner:
+        scope = active[key] = {"view": None, "dirty": True}
+    # Only an active nested scope may own a previous view.
+    previous = None if owner else getattr(store, "_triage_view", None)
+    try:
+        if scope["dirty"]:
+            recover(store)
+            scope["view"] = store._triage_view
+            scope["dirty"] = False
+        store._triage_view = scope["view"]
+        yield
+    except BaseException:
+        scope["dirty"] = True
+        raise
+    finally:
+        store._triage_view = previous
+        if owner:
+            active.pop(key, None)
 
 
 def _cache(store):
@@ -230,7 +269,9 @@ def event_exists(store, data):
     existing = old[1] if old is not None and old[0] == raw else _parse(raw, path)
     if existing != data["event"]:
         raise StorageIntegrityError(f"Conflicting triage event: {path}")
-    cache.events[key] = (raw, existing)
+    # Equality was checked above. Keep the validated receipt's canonical object
+    # rather than a duplicate parsed dictionary and strings for every event.
+    cache.events[key] = (raw, data["event"])
     return True
 
 

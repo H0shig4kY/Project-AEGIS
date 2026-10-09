@@ -346,3 +346,101 @@ def test_warm_snapshot_does_not_override_technical_fields(campaign):
     current = store.get(record.finding_id)
     assert (current.seen_count, current.missing_count) == (42, 7)
     assert len(history.find()) == 2
+
+
+def test_nested_store_instances_share_current_sequence(campaign):
+    store, history, record, manager = campaign
+    other = FindingTriageManager(FindingStore(store.path), history)
+    with store.transaction():
+        other.suppress(record.finding_id, actor="other", reason="review")
+        manager.unsuppress(record.finding_id, actor="owner", reason="review")
+    assert store.get(record.finding_id).triage_state == FindingTriageState.OPEN
+    assert [json.loads(path.read_text())["sequence"] for path in receipts(store)] == [1, 2]
+    assert len(history.find()) == 2
+
+
+def test_caught_intent_publication_failure_refreshes_outer_view(campaign, monkeypatch):
+    store, history, record, manager = campaign
+    original = triage_journal.atomic_write_text
+    failed = False
+    def publish_then_fail(path, content, **kwargs):
+        nonlocal failed
+        original(path, content, **kwargs)
+        if path.suffix == ".txn" and kwargs.get("exclusive") and not failed:
+            failed = True
+            raise OSError("intent published, sync failed")
+    monkeypatch.setattr(triage_journal, "atomic_write_text", publish_then_fail)
+    with store.transaction():
+        with pytest.raises(OSError, match="intent published"):
+            manager.suppress(record.finding_id, actor="operator", reason="review")
+        assert store.get(record.finding_id).triage_state == FindingTriageState.SUPPRESSED
+        manager.unsuppress(record.finding_id, actor="operator", reason="review")
+    assert store.get(record.finding_id).triage_state == FindingTriageState.OPEN
+    assert [json.loads(path.read_text())["sequence"] for path in receipts(store)] == [1, 2]
+    assert len(history.find()) == 2
+
+
+def test_nested_alias_update_rejects_stale_triage_save(campaign):
+    store, history, record, manager = campaign
+    manager.suppress(record.finding_id, actor="operator", reason="review")
+    other = FindingTriageManager(FindingStore(store.path), history)
+    with store.transaction():
+        stale = store.get(record.finding_id)
+        other.unsuppress(record.finding_id, actor="other", reason="review")
+        with pytest.raises(StorageIntegrityError, match="stale"):
+            store.save(stale)
+        assert store.get(record.finding_id).triage_state == FindingTriageState.OPEN
+    assert len(history.find()) == 2
+
+
+@pytest.mark.parametrize("phase", ["state", "event", "receipt"])
+def test_caught_nested_crash_recovers_before_next_operation(campaign, monkeypatch, phase):
+    store, history, record, manager = campaign
+    class Crash(BaseException):
+        pass
+    original_save, original_event, original_finish = store.save, history.save, triage_journal.finish
+    def save(value):
+        result = original_save(value)
+        if phase == "state":
+            raise Crash()
+        return result
+    def event(value):
+        result = original_event(value)
+        if phase == "event":
+            raise Crash()
+        return result
+    def finish(path, data, status="done"):
+        original_finish(path, data, status)
+        if phase == "receipt":
+            raise Crash()
+    monkeypatch.setattr(store, "save", save)
+    monkeypatch.setattr(history, "save", event)
+    monkeypatch.setattr(triage_journal, "finish", finish)
+    with store.transaction():
+        with pytest.raises(Crash):
+            manager.suppress(record.finding_id, actor="operator", reason="review")
+        monkeypatch.undo()
+        for _ in range(3):
+            assert store.get(record.finding_id).triage_state == FindingTriageState.SUPPRESSED
+            assert len(history.find()) == 1
+        assert json.loads(receipts(store)[0].read_text())["status"] == "done"
+        manager.unsuppress(record.finding_id, actor="operator", reason="review")
+    assert len(history.find()) == 2
+    assert [json.loads(path.read_text())["sequence"] for path in receipts(store)] == [1, 2]
+
+
+def test_event_cache_accepts_equivalent_json_and_rejects_changed_payload(campaign):
+    store, history, record, manager = campaign
+    manager.suppress(record.finding_id, actor="operator", reason="review")
+    store.get(record.finding_id)
+    path = next(history.directory.glob("*.json"))
+    payload = json.loads(path.read_text())
+    path.write_text(json.dumps(payload))  # Different bytes, same complete event.
+    assert store.get(record.finding_id).triage_state == FindingTriageState.SUPPRESSED
+    before = path.read_bytes()
+    rewrite_same_metadata(path, before.replace(b"review", b"edited"))
+    with pytest.raises(StorageIntegrityError, match="Conflicting"):
+        store.get(record.finding_id)
+    path.write_bytes(before)
+    assert store.get(record.finding_id).triage_state == FindingTriageState.SUPPRESSED
+    assert len(history.find()) == 1

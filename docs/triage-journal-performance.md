@@ -133,3 +133,53 @@ recovery, technical-field independence, symlink retargeting and fork cache reset
 The last two cases require POSIX and are skipped on Windows.
 All 551 existing test cases are retained. Local Python 3.12/3.13: 578 passed each.
 Final CI outcomes are recorded in the PR/report after publication.
+
+## PR #5 integration review
+
+Two reproduced consistency defects were corrected: nested FindingStore instances
+for the same directory previously used different sequence snapshots, and a
+failure caught inside an outer transaction could leave its snapshot usable
+without recovery. Transaction views now belong to a thread-local, PID-scoped,
+canonical-directory scope under the existing directory lock. All participating
+store instances share that view. Any escaping nested BaseException marks the
+scope dirty; the next public operation recovers source files before reuse.
+Outermost exit discards the view. Public APIs and persisted formats are unchanged.
+
+Seven regression cases cover nested instances, stale triage saves, a published
+intent followed by a caught exception, interruptions after state/event/receipt
+publication, and equivalent versus modified event JSON. Local complete suites:
+585 passed on Python 3.12 and 585 passed on Python 3.13. Windows CI results must
+be checked separately after publication.
+
+Validated event dictionaries now reuse the canonical receipt event rather than
+retaining an equal second dictionary. Reproduce the heap measurement with:
+
+    python benchmarks/triage_journal_memory.py --source ./aegis
+
+For an original-PR comparison, extract commit
+1922142a7da84bdb7e174e2496ef4bb3601ad3f9 and pass its aegis directory instead.
+The fixture contains 10,000 receipts; fixture creation is excluded. tracemalloc
+measures Python allocations, not RSS, SQLite allocations or operating-system
+cache. Original versus corrected retained heap: 43.84 versus 32.81 MiB (25.2%
+less), with 10,000 versus zero duplicate event dictionaries. After ten additional
+queries: 43.84 versus 32.81 MiB; after releasing the store: approximately 0.03
+MiB. Corrected repeated-query peak: 34.69 MiB. Measurements are stored in
+benchmarks/results/pr5-review-linux-memory*.json.
+
+The corrected benchmark rerun (pr5-review-linux-after.json) uses the same fixture,
+operations and seven samples as Sprint 4. Comparing with the previously measured
+sprint4-linux-before.json baseline, at 10,000 receipts repeated queries improve
+5.37x (881.35 to 164.26 ms), same-store transitions 6.73x (1361.69 to 202.24 ms),
+and independent-store transitions 3.07x (1405.84 to 457.25 ms). Actual fresh-process
+first queries improve 2.18x (858.52 to 393.04 ms). These are a new corrected run
+against a historical baseline, not simultaneous paired measurements. There is
+no regression at 100 receipts against that baseline. Benchmarks remain outside
+functional CI and are not portable performance guarantees.
+
+Residual limits: memory and source-byte validation remain O(N); no receipt
+compaction is introduced. Non-cooperating mutation while a transaction holds its
+lock remains outside the cooperative locking guarantee. Forking while an active
+SQLite directory-lock connection exists was observed to fail closed with a lock
+timeout; it is a pre-existing availability limitation, not an accepted stale
+view. Start processes before acquiring locks or use spawn. Supported separate
+process and fork-outside-active-lock regression tests continue to pass.
