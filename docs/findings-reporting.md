@@ -15,6 +15,13 @@ missing audit events, contradictory events and finding-state divergence produce
 an explicit error, without repairing or deleting data. Complete source JSON is
 validated before rendering or exporting anything.
 
+Directory enumeration propagates access and iteration failures for findings and
+both histories. Only a genuinely missing directory is treated as empty; a
+dangling directory symlink, a non-directory storage path or a failure after
+enumeration starts is an error. Filename case matching retains platform rules.
+Output symlink loops are reported as controlled CLI errors on Python 3.12/3.13,
+with stderr and no publication, rather than escaping as an unhandled exception.
+
 Available finding fields are rule_id, severity, title, description, asset type
 and value, affected_service, plugin, coverage_plugins, technical state, triage
 state, lifecycle timestamps, counters and active. Severity is copied, never

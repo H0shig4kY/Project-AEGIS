@@ -4,6 +4,7 @@ import os
 import re
 import subprocess
 import sys
+from types import SimpleNamespace
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -619,6 +620,7 @@ def test_enumeration_failure_prevents_incomplete_report(campaign, tmp_path, monk
         def __exit__(self, *args):
             pass
         def __iter__(self):
+            yield SimpleNamespace(name='unread.json')
             raise OSError('injected enumeration failure')
     def scan(path):
         if Path(path) == directory:
@@ -636,7 +638,7 @@ def test_enumeration_failure_prevents_incomplete_report(campaign, tmp_path, monk
     assert snapshot(campaign.path) == before
 
 
-@pytest.mark.parametrize('failure', ['missing_after_open', 'not_directory'])
+@pytest.mark.parametrize('failure', ['missing_at_open', 'missing_after_open', 'not_directory'])
 def test_enumeration_errors_are_not_normal_absence(campaign, monkeypatch, failure):
     finding(campaign)
     original = os.scandir
@@ -649,6 +651,8 @@ def test_enumeration_errors_are_not_normal_absence(campaign, monkeypatch, failur
             raise FileNotFoundError('directory vanished during enumeration')
     def scan(path):
         if Path(path) == campaign.findings_dir:
+            if failure == 'missing_at_open':
+                raise FileNotFoundError('existing directory cannot be opened')
             if failure == 'not_directory':
                 raise NotADirectoryError('invalid storage directory')
             return VanishedScan()
@@ -676,3 +680,59 @@ def test_output_symlink_loop_is_a_controlled_cli_error(campaign, tmp_path, monke
     assert 'symlink' in result.stderr.lower() and 'Traceback' not in result.output
     assert not destination.exists() and not list(tmp_path.glob('.loop.*.tmp'))
     assert snapshot(campaign.path) == before
+
+
+@pytest.mark.parametrize('target', ['findings', 'finding_history', 'finding_triage_history'])
+@pytest.mark.parametrize('present', [False, True])
+def test_empty_or_absent_storage_directory_is_valid(campaign, target, present):
+    if present:
+        (campaign.data_dir / target).mkdir(parents=True)
+    before = snapshot(campaign.path)
+    assert report(campaign)['summary']['total'] == 0
+    assert snapshot(campaign.path) == before
+
+
+def test_output_resolution_does_not_hide_unrelated_runtime_errors(campaign, tmp_path, monkeypatch):
+    destination = tmp_path / 'report.json'
+    original = Path.resolve
+    def resolve(path, *args, **kwargs):
+        if path == destination:
+            raise RuntimeError('unrelated programming error')
+        return original(path, *args, **kwargs)
+    monkeypatch.setattr(Path, 'resolve', resolve)
+    with pytest.raises(RuntimeError, match='unrelated programming error'):
+        write_report(destination, '{}', campaign=campaign)
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize('target', ['finding', 'technical', 'triage'])
+@pytest.mark.parametrize('format', ['json', 'markdown'])
+def test_source_read_failure_prevents_export(campaign, tmp_path, monkeypatch, target, format):
+    record = finding(campaign)
+    manager(campaign).acknowledge(record.finding_id, actor='operator', reason='review')
+    technical = FindingEvent('f' * 64, record.finding_id, FindingEventType.STATE_CHANGED,
+                             FindingState.ACTIVE, FindingState.RESOLVED, NOW)
+    FindingHistoryStore(campaign.finding_history_dir).save(technical)
+    paths = {'finding': campaign.findings_dir / f'{record.finding_id}.json',
+             'technical': campaign.finding_history_dir / f'{technical.event_id}.json',
+             'triage': next(campaign.finding_triage_history_dir.glob('*.json'))}
+    original = Path.open
+    before = snapshot(campaign.path)
+    destination = tmp_path / 'report.txt'
+    def open_source(path, *args, **kwargs):
+        if path == paths[target]:
+            raise PermissionError('injected denied source read')
+        return original(path, *args, **kwargs)
+    with monkeypatch.context() as scoped:
+        scoped.setattr(Path, 'open', open_source)
+        result = cli('--format', format, '--output', str(destination))
+    assert result.exit_code == 1 and result.stdout == '' and result.stderr
+    assert not destination.exists() and snapshot(campaign.path) == before
+
+
+def test_enumeration_preserves_platform_filename_case_rules(tmp_path, monkeypatch):
+    from aegis.findings_report import _json_paths
+    source = tmp_path / 'legacy.JSON'
+    source.write_text('{}')
+    monkeypatch.setattr(os.path, 'normcase', lambda name: name.lower())
+    assert _json_paths(tmp_path) == [source]

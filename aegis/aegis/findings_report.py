@@ -1,5 +1,6 @@
 """Read-only projection of persisted findings; never run recovery or scans."""
 
+import errno
 import json
 import os
 import re
@@ -25,6 +26,25 @@ class ReportFormat(str, Enum):
     MARKDOWN = "markdown"
 
 
+def _json_paths(directory):
+    """Only an absent directory is empty; never suppress enumeration failures."""
+    try:
+        try:
+            scan = os.scandir(directory)
+        except FileNotFoundError:
+            # A dangling directory symlink is invalid storage, not legacy absence.
+            try:
+                directory.lstat()
+            except FileNotFoundError:
+                return []
+            raise
+        with scan:
+            return sorted(directory / entry.name for entry in scan
+                          if os.path.normcase(entry.name).endswith(".json"))
+    except OSError as error:
+        raise StorageIntegrityError(f"Cannot enumerate storage directory {directory}: {error}") from error
+
+
 def _event_key(payload):
     timestamp = datetime.fromisoformat(payload["detected_at"])
     # Keep legacy naive timestamps unchanged in output. Their timezone is unknown.
@@ -35,7 +55,7 @@ def _event_key(payload):
 
 def _history(directory, records, *, operational):
     events = {}
-    for path in sorted(directory.glob("*.json")):
+    for path in _json_paths(directory):
         try:
             payload = read_json(path)
             if operational:
@@ -109,7 +129,7 @@ def build_report(campaign: CampaignContext, *, generated_at: datetime | None = N
                 raise StorageIntegrityError(f"Invalid assessment configuration: {error}") from error
             records = {}
             sources = {}
-            for path in sorted(campaign.findings_dir.glob("*.json")):
+            for path in _json_paths(campaign.findings_dir):
                 try:
                     source = read_json(path)
                     record = FindingStore._deserialize(source)
@@ -216,7 +236,17 @@ def render_markdown(report: dict) -> str:
 def write_report(destination: Path, content: str, *, campaign: CampaignContext) -> None:
     """Publish a complete export exclusively; never overwrite assessment inputs."""
     destination = Path(destination)
-    resolved = destination.resolve()
+    try:
+        resolved = destination.resolve()
+    except RuntimeError as error:
+        # Python 3.12 translates ELOOP into this specific RuntimeError.
+        if not str(error).startswith("Symlink loop from "):
+            raise
+        raise ValueError(f"Cannot resolve report output: symlink loop in {destination}") from error
+    except OSError as error:
+        if error.errno != errno.ELOOP:
+            raise
+        raise ValueError(f"Cannot resolve report output: symlink loop in {destination}") from error
     with directory_lock(campaign.findings_dir, create=False):
         entries = triage_journal.inspect_completed(campaign.findings_dir)
         protected = {campaign.data_dir.resolve(), campaign.evidence_dir.resolve()}
