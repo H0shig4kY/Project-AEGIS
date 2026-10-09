@@ -8,6 +8,7 @@ from aegis.models import (
     AssetType,
     FindingRecord,
     FindingState,
+    FindingTriageState,
 )
 
 
@@ -73,6 +74,9 @@ class FindingStore:
             ),
             "state": (
                 record.state.value
+            ),
+            "triage_state": (
+                record.triage_state.value
             ),
             "first_seen": (
                 record.first_seen.isoformat()
@@ -180,6 +184,12 @@ class FindingStore:
                 data.get(
                     "state",
                     FindingState.ACTIVE.value,
+                )
+            ),
+            triage_state=FindingTriageState(
+                data.get(
+                    "triage_state",
+                    FindingTriageState.OPEN.value,
                 )
             ),
             first_seen=(

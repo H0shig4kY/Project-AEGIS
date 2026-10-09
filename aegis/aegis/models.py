@@ -1,3 +1,4 @@
+
 from enum import Enum
 from typing import Any
 from datetime import datetime, timezone
@@ -41,9 +42,11 @@ class FingerprintSource(str, Enum):
     PORT = "port"
     BANNER = "banner"
 
+
 class IntegrityBaselineType(str, Enum):
     ORIGINAL = "original"
     RETROSPECTIVE = "retrospective"
+
 
 class AssetRelationType(str, Enum):
     RESOLVES_TO = "resolves_to"
@@ -59,6 +62,7 @@ class AssetRelation(BaseModel):
 
     target_type: AssetType
     target_value: str
+
 
 class ResultIntegrityRecord(BaseModel):
     filename: str
@@ -114,22 +118,26 @@ class ServiceMetadata(BaseModel):
 
         return normalized
 
+
 class AssetProvenance(BaseModel):
     plugin: str
     plugin_version: str | None = None
     observation_type: str
     target: str
+
     observed_at: datetime = Field(
         default_factory=lambda: datetime.now(
             timezone.utc
         )
     )
+
     result_file: str | None = None
 
     observation_id: str | None = None
     result_id: str | None = None
     result_sha256: str | None = None
     integrity_baseline: IntegrityBaselineType | None = None
+
 
 class Asset(BaseModel):
     value: str
@@ -151,6 +159,7 @@ class Asset(BaseModel):
     seen_count: int = 0
     active: bool = True
 
+
 class TLSMetadata(BaseModel):
     host: str
     port: int
@@ -166,6 +175,7 @@ class TLSMetadata(BaseModel):
         default_factory=list
     )
     certificate_sha256: str | None = None
+
 
 class CertificateMetadata(BaseModel):
     host: str
@@ -206,6 +216,7 @@ class CertificateMetadata(BaseModel):
 
         return normalized
 
+
 class RelationProvenance(BaseModel):
     plugin: str
     plugin_version: str | None = None
@@ -240,6 +251,7 @@ class AssetRelation(BaseModel):
     seen_count: int = 0
     active: bool = True
 
+
 class CoverageType(str, Enum):
     DNS = "dns"
     HTTP = "http"
@@ -256,8 +268,9 @@ class ExecutionCoverage(BaseModel):
         default_factory=list
     )
 
+
 class AssetChange(BaseModel):
-    change_type: ChangeType
+    change_type: "ChangeType"
     asset_type: AssetType
     asset_value: str
 
@@ -267,8 +280,9 @@ class AssetChange(BaseModel):
     previous_result: str | None = None
     current_result: str | None = None
 
+
 class ChangeRecord(BaseModel):
-    change_type: ChangeType
+    change_type: "ChangeType"
 
     asset_type: AssetType | None = None
     asset_value: str | None = None
@@ -293,6 +307,7 @@ class ChangeRecord(BaseModel):
     previous_result: str | None = None
     current_result: str | None = None
 
+
 class ChangeType(str, Enum):
     NEW = "new"
     CONFIRMED = "confirmed"
@@ -300,20 +315,27 @@ class ChangeType(str, Enum):
     INACTIVE = "inactive"
     REACTIVATED = "reactivated"
 
-class FindingState(
-    str,
-    Enum,
-):
+
+# =====================================================
+# FINDING MODELS
+# =====================================================
+
+class FindingState(str, Enum):
     ACTIVE = "active"
     CANDIDATE_MISSING = "candidate_missing"
     RESOLVED = "resolved"
 
-class FindingEventType(
-    str,
-    Enum,
-):
+
+class FindingTriageState(str, Enum):
+    OPEN = "open"
+    ACKNOWLEDGED = "acknowledged"
+    SUPPRESSED = "suppressed"
+
+
+class FindingEventType(str, Enum):
     CREATED = "created"
     STATE_CHANGED = "state_changed"
+
 
 @dataclass
 class FindingRecord:
@@ -335,8 +357,14 @@ class FindingRecord:
         ...
     ] = ()
 
+    # Technical detection lifecycle
     state: FindingState = (
         FindingState.ACTIVE
+    )
+
+    # Operational triage lifecycle
+    triage_state: FindingTriageState = (
+        FindingTriageState.OPEN
     )
 
     first_seen: datetime | None = None
@@ -347,6 +375,7 @@ class FindingRecord:
     missing_count: int = 0
 
     active: bool = True
+
 
 @dataclass
 class FindingEvent:
