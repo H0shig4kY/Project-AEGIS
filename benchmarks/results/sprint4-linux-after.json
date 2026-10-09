@@ -1,0 +1,249 @@
+{
+  "python": "3.12.14 (main, Aug 25 2026, 14:00:49) [Clang 22.1.3 ]",
+  "platform": "Linux-6.18.44-x86_64-with-glibc2.39",
+  "source": "/workspace/scratch/1f12eaa6576a/triage-journal-performance/aegis",
+  "repeats": 7,
+  "clock": "perf_counter",
+  "rows": [
+    {
+      "receipts": 100,
+      "stages_ms": {
+        "read": 0.625816000138002,
+        "parse": 0.36185699991619913,
+        "event_validation": 0.5971919999865349,
+        "sort": 0.013361000128497835,
+        "global_chain": 0.027211000087845605,
+        "atomic_write": 0.3423870000460738,
+        "recovery": 2.27611899981639
+      },
+      "first_query_ms": 4.160055000056673,
+      "reopened_query_median_ms": 3.2285370000408875,
+      "process_restart_query_median_ms": 5.156669999905716,
+      "repeated_query_median_ms": 1.674799999818788,
+      "transition_median_ms": 3.864428000042608,
+      "independent_transition_median_ms": 5.575153000108912,
+      "profile_top_self": [
+        {
+          "function": "<built-in method _io.open>",
+          "calls": 202,
+          "self_ms": 0.738
+        },
+        {
+          "function": "triage_journal.py:event_exists",
+          "calls": 100,
+          "self_ms": 0.314
+        },
+        {
+          "function": "triage_journal.py:recover",
+          "calls": 1,
+          "self_ms": 0.309
+        },
+        {
+          "function": "<method 'read' of '_io.BufferedReader' objects>",
+          "calls": 200,
+          "self_ms": 0.254
+        },
+        {
+          "function": "triage_journal.py:_entries",
+          "calls": 1,
+          "self_ms": 0.2
+        },
+        {
+          "function": "<method '__exit__' of '_io._IOBase' objects>",
+          "calls": 202,
+          "self_ms": 0.167
+        },
+        {
+          "function": "<method 'execute' of 'sqlite3.Connection' objects>",
+          "calls": 1,
+          "self_ms": 0.14
+        },
+        {
+          "function": "<frozen posixpath>:join",
+          "calls": 119,
+          "self_ms": 0.121
+        },
+        {
+          "function": "atomic_storage.py:directory_lock",
+          "calls": 2,
+          "self_ms": 0.083
+        },
+        {
+          "function": "triage_journal.py:_cache",
+          "calls": 2,
+          "self_ms": 0.081
+        },
+        {
+          "function": "<built-in method _sqlite3.connect>",
+          "calls": 1,
+          "self_ms": 0.055
+        },
+        {
+          "function": "<method 'append' of 'list' objects>",
+          "calls": 109,
+          "self_ms": 0.051
+        }
+      ]
+    },
+    {
+      "receipts": 1000,
+      "stages_ms": {
+        "read": 6.7656909998277115,
+        "parse": 3.8622939998731454,
+        "event_validation": 5.505036999920776,
+        "sort": 0.14434800004892168,
+        "global_chain": 0.37571699999716657,
+        "atomic_write": 0.24116400004459138,
+        "recovery": 16.17295300002297
+      },
+      "first_query_ms": 34.615282999993724,
+      "reopened_query_median_ms": 33.30720700000711,
+      "process_restart_query_median_ms": 33.76062200004526,
+      "repeated_query_median_ms": 12.77067299997725,
+      "transition_median_ms": 16.411693999998533,
+      "independent_transition_median_ms": 37.59363199992549,
+      "profile_top_self": [
+        {
+          "function": "<built-in method _io.open>",
+          "calls": 2002,
+          "self_ms": 6.036
+        },
+        {
+          "function": "triage_journal.py:event_exists",
+          "calls": 1000,
+          "self_ms": 2.948
+        },
+        {
+          "function": "<method 'read' of '_io.BufferedReader' objects>",
+          "calls": 2000,
+          "self_ms": 2.444
+        },
+        {
+          "function": "triage_journal.py:_entries",
+          "calls": 1,
+          "self_ms": 1.765
+        },
+        {
+          "function": "<method '__exit__' of '_io._IOBase' objects>",
+          "calls": 2002,
+          "self_ms": 1.568
+        },
+        {
+          "function": "<frozen posixpath>:join",
+          "calls": 1019,
+          "self_ms": 0.917
+        },
+        {
+          "function": "triage_journal.py:recover",
+          "calls": 1,
+          "self_ms": 0.898
+        },
+        {
+          "function": "<method 'get' of 'dict' objects>",
+          "calls": 2022,
+          "self_ms": 0.452
+        },
+        {
+          "function": "triage_journal.py:_history",
+          "calls": 1000,
+          "self_ms": 0.346
+        },
+        {
+          "function": "<method 'endswith' of 'str' objects>",
+          "calls": 2023,
+          "self_ms": 0.291
+        },
+        {
+          "function": "<built-in method builtins.getattr>",
+          "calls": 2014,
+          "self_ms": 0.207
+        },
+        {
+          "function": "<built-in method posix.fspath>",
+          "calls": 1057,
+          "self_ms": 0.178
+        }
+      ]
+    },
+    {
+      "receipts": 10000,
+      "stages_ms": {
+        "read": 68.133749000026,
+        "parse": 35.475491999932274,
+        "event_validation": 53.164996999839786,
+        "sort": 2.0277940000141825,
+        "global_chain": 8.217134000005899,
+        "atomic_write": 0.5477270001392753,
+        "recovery": 174.664292999978
+      },
+      "first_query_ms": 408.6359170000833,
+      "reopened_query_median_ms": 416.69475100002273,
+      "process_restart_query_median_ms": 387.96757499994783,
+      "repeated_query_median_ms": 162.8588490000311,
+      "transition_median_ms": 184.75390399999014,
+      "independent_transition_median_ms": 438.95114200017815,
+      "profile_top_self": [
+        {
+          "function": "<built-in method _io.open>",
+          "calls": 20002,
+          "self_ms": 85.013
+        },
+        {
+          "function": "triage_journal.py:_entries",
+          "calls": 1,
+          "self_ms": 62.441
+        },
+        {
+          "function": "triage_journal.py:event_exists",
+          "calls": 10000,
+          "self_ms": 53.239
+        },
+        {
+          "function": "<method 'read' of '_io.BufferedReader' objects>",
+          "calls": 20000,
+          "self_ms": 30.153
+        },
+        {
+          "function": "<method '__exit__' of '_io._IOBase' objects>",
+          "calls": 20002,
+          "self_ms": 21.44
+        },
+        {
+          "function": "triage_journal.py:recover",
+          "calls": 1,
+          "self_ms": 15.702
+        },
+        {
+          "function": "<frozen posixpath>:join",
+          "calls": 10019,
+          "self_ms": 14.67
+        },
+        {
+          "function": "triage_journal.py:_history",
+          "calls": 10000,
+          "self_ms": 8.465
+        },
+        {
+          "function": "<method 'get' of 'dict' objects>",
+          "calls": 20022,
+          "self_ms": 7.96
+        },
+        {
+          "function": "<method 'add' of 'set' objects>",
+          "calls": 10000,
+          "self_ms": 4.004
+        },
+        {
+          "function": "<method 'endswith' of 'str' objects>",
+          "calls": 20023,
+          "self_ms": 3.965
+        },
+        {
+          "function": "<method 'startswith' of 'str' objects>",
+          "calls": 10033,
+          "self_ms": 3.446
+        }
+      ]
+    }
+  ]
+}

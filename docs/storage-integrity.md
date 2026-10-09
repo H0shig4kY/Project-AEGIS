@@ -148,3 +148,7 @@ compaction design before scaling. Do not delete receipts to meet that budget.
 Cold disks, antivirus, multiple findings and serialized contention can be slower;
 repeated per-finding calls in a batch can multiply the scan cost.
 No compaction or new storage feature was implemented in this review.
+
+Sprint 4 profiling, byte-validated caching and updated measurements are documented
+in [triage-journal-performance.md](triage-journal-performance.md). The timings
+above remain the historical Sprint 3 baseline.
