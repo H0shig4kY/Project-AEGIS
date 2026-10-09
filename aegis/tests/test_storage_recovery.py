@@ -432,3 +432,116 @@ def test_pending_conflicting_event_does_not_modify_finding(stores, monkeypatch):
         FindingStore(store.path).get(record.finding_id)
     assert json.loads((store.path / f'{record.finding_id}.json').read_text())['triage_state'] == 'open'
     assert path.read_text() == '{}'
+
+
+def test_aborted_receipt_detects_state_divergence(stores, monkeypatch):
+    store, history, record, manager = stores
+    monkeypatch.setattr(history, 'save', lambda event: (_ for _ in ()).throw(OSError('audit')))
+    with pytest.raises(OSError):
+        manager.suppress(record.finding_id, actor='operator', reason='review')
+    monkeypatch.undo()
+    path = store.path / f'{record.finding_id}.json'
+    payload = json.loads(path.read_text())
+    payload['triage_state'] = 'suppressed'
+    path.write_text(json.dumps(payload))
+    before = path.read_bytes()
+    with pytest.raises(StorageIntegrityError, match='divergence'):
+        FindingStore(store.path).get(record.finding_id)
+    assert path.read_bytes() == before
+    assert history.find() == []
+
+
+def test_contradictory_receipt_chain_is_preserved(stores):
+    store, history, record, manager = stores
+    manager.suppress(record.finding_id, actor='operator', reason='review')
+    manager.unsuppress(record.finding_id, actor='operator', reason='review')
+    paths = sorted((store.path / '.triage-journal').glob('*.txn'),
+                   key=lambda p: json.loads(p.read_text())['sequence'])
+    payload = json.loads(paths[1].read_text())
+    payload['event'].update(event_type='acknowledge', from_state='open', to_state='acknowledged')
+    paths[1].write_text(json.dumps(payload))
+    event_path = history.directory / (payload['event']['event_id'] + '.json')
+    event_path.unlink()
+    finding_path = store.path / f'{record.finding_id}.json'
+    finding = json.loads(finding_path.read_text())
+    finding['triage_state'] = 'acknowledged'
+    finding_path.write_text(json.dumps(finding))
+    before = paths[1].read_bytes()
+    with pytest.raises(StorageIntegrityError, match='chain'):
+        FindingStore(store.path).get(record.finding_id)
+    assert paths[1].read_bytes() == before
+    assert not event_path.exists()
+
+
+@pytest.mark.skipif(os.name != 'posix', reason='fork is POSIX only')
+def test_fork_child_cannot_inherit_parent_lock(tmp_path):
+    # Fresh subprocess isolates fork/SQLite from pytest's own runtime.
+    code = """
+import os, sys
+from pathlib import Path
+from aegis.atomic_storage import directory_lock, StorageIntegrityError
+with directory_lock(Path(sys.argv[1])):
+    pid = os.fork()
+    if pid == 0:
+        try:
+            with directory_lock(Path(sys.argv[1]), timeout=0.05):
+                os._exit(7)
+        except StorageIntegrityError:
+            os._exit(0)
+    _, status = os.waitpid(pid, 0)
+    assert os.waitstatus_to_exitcode(status) == 0
+with directory_lock(Path(sys.argv[1]), timeout=0.05):
+    pass
+"""
+    result = subprocess.run([sys.executable, '-c', code, str(tmp_path)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_post_replace_sync_failure_reports_publication(tmp_path, monkeypatch):
+    from aegis import atomic_storage
+    path = tmp_path / 'record.json'
+    path.write_text('{"old": true}')
+    monkeypatch.setattr(atomic_storage, 'sync_directory',
+                        lambda directory: (_ for _ in ()).throw(OSError('directory sync')))
+    with pytest.raises(OSError, match='directory sync'):
+        atomic_write_text(path, '{"new": true}')
+    assert json.loads(path.read_text()) == {'new': True}
+    assert list(tmp_path.glob('*.tmp')) == []
+    monkeypatch.undo()
+    with directory_lock(tmp_path, timeout=0.05):
+        pass
+
+
+def test_published_event_io_failure_recovers_once(stores, monkeypatch):
+    store, history, record, manager = stores
+    original = history.save
+    def save_then_fail(event):
+        original(event)
+        raise OSError('after publication')
+    monkeypatch.setattr(history, 'save', save_then_fail)
+    with pytest.raises(OSError, match='after publication'):
+        manager.suppress(record.finding_id, actor='operator', reason='review')
+    monkeypatch.undo()
+    before = {p.name: p.read_bytes() for p in history.directory.glob('*.json')}
+    for _ in range(10):
+        assert FindingStore(store.path).get(record.finding_id).triage_state == FindingTriageState.SUPPRESSED
+    assert len(history.find()) == 1
+    assert {p.name: p.read_bytes() for p in history.directory.glob('*.json')} == before
+
+
+def test_reentrant_lock_exception_releases_outer_lock(tmp_path):
+    with pytest.raises(RuntimeError):
+        with directory_lock(tmp_path) as outer:
+            with directory_lock(tmp_path) as nested:
+                assert not outer and nested
+                raise RuntimeError('operation failed')
+    code = """
+import sys
+from pathlib import Path
+from aegis.atomic_storage import directory_lock
+with directory_lock(Path(sys.argv[1]), timeout=0.05):
+    pass
+"""
+    result = subprocess.run([sys.executable, '-c', code, str(tmp_path)],
+                            capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr

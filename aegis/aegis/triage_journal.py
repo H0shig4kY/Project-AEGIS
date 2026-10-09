@@ -40,6 +40,14 @@ def _entries(store):
     sequences = [data["sequence"] for _, data in entries]
     if len(set(sequences)) != len(sequences):
         raise StorageIntegrityError(f"Duplicate journal sequence in {directory}")
+    expected = {}
+    for path, data in entries:
+        event = data["event"]
+        finding_id = event["finding_id"]
+        if finding_id in expected and event["from_state"] != expected[finding_id]:
+            raise StorageIntegrityError(f"Contradictory triage journal chain: {path}")
+        expected[finding_id] = (event["from_state"] if data["status"] in
+                                {"abort", "aborted"} else event["to_state"])
     return entries
 
 
@@ -151,6 +159,7 @@ def recover(store):
         if status == "aborted":
             if event_exists(store, data):
                 raise StorageIntegrityError(f"Aborted operation has an audit event: {path}")
+            latest[data["event"]["finding_id"]] = data
             continue
         present = event_exists(store, data)
         if status == "pending":
@@ -163,14 +172,19 @@ def recover(store):
         latest[data["event"]["finding_id"]] = data
     for finding_id, data in latest.items():
         record = store._get(finding_id)
-        if record is None or record.triage_state.value != data["event"]["to_state"]:
+        expected = (data["event"]["from_state"] if data["status"] == "aborted"
+                    else data["event"]["to_state"])
+        if record is None or record.triage_state.value != expected:
             raise StorageIntegrityError(f"Finding/journal state divergence: {finding_id}")
 
 
 def validate_save(store, record):
     latest = None
     for _, data in _entries(store):
-        if data["event"]["finding_id"] == record.finding_id and data["status"] in ("pending", "done"):
+        if data["event"]["finding_id"] == record.finding_id:
             latest = data
-    if latest and record.triage_state.value != latest["event"]["to_state"]:
+    expected = None if latest is None else (
+        latest["event"]["from_state"] if latest["status"] in {"abort", "aborted"}
+        else latest["event"]["to_state"])
+    if latest and record.triage_state.value != expected:
         raise StorageIntegrityError(f"Refusing stale triage state write: {record.finding_id}")

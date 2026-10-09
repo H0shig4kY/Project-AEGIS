@@ -27,6 +27,11 @@ def directory_lock(directory: Path, *, timeout: float = 10):
     directory = Path(directory).resolve()
     directory.mkdir(parents=True, exist_ok=True)
     key = os.path.normcase(str(directory))
+    # A fork inherits Python bookkeeping, not the parent's OS lock ownership.
+    # Never reuse an inherited SQLite connection or claim child reentrancy.
+    if getattr(_local, "pid", None) != os.getpid():
+        _local.pid = os.getpid()
+        _local.locks = {}
     held = getattr(_local, "locks", None)
     if held is None:
         held = _local.locks = {}

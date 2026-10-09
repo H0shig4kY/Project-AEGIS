@@ -116,3 +116,35 @@ nor cryptographically tamper-evident. Network filesystems are not a tested deplo
 target. Filesystem fsync/replace guarantees and hardware behavior limit durability;
 Windows has no portable directory fsync. No unconditional power-loss guarantee
 or campaign-wide ACID transaction is claimed.
+
+
+## PR #4 integration review
+
+Review reproduced and corrected three P1 defects: inherited reentrancy after
+POSIX fork bypassed the parent's process lock; aborted-only receipts failed to
+detect state divergence; and individually valid but contradictory receipt chains
+could reconstruct an impossible missing event. Reentrancy is now PID-scoped.
+Receipt chains are checked before recovery writes, and aborted receipts establish
+the expected state used by recovery and stale-save validation.
+
+Six additional regressions cover those defects, post-replace directory-sync
+failure, published-event I/O failure with ten repeated recoveries, and nested
+lock exception release verified by a fresh process. Local Python 3.12 and 3.13:
+551 passed each. The fork regression is intentionally skipped on Windows.
+
+Synthetic local Linux benchmark (Python 3.12, warm filesystem cache, one finding,
+five get calls, one transition; setup writes are excluded):
+| Retained receipts per finding-store directory | Median get | Maximum get | Transition |
+| --- | --- | --- | --- |
+| 100 | 9.9 ms | 17.0 ms | 17.1 ms |
+| 1,000 | 98.3 ms | 98.6 ms | 161.6 ms |
+| 10,000 | 960.6 ms | 1,057.7 ms | 1,562.1 ms |
+
+These are observed timings, not portable service guarantees. Recommend an initial
+operational budget of 1,000 receipts per finding-store directory for interactive
+use, followed by measurements on actual Windows/Linux storage and workloads.
+At 10,000 receipts or sustained latency above 500 ms, plan a separate indexing/
+compaction design before scaling. Do not delete receipts to meet that budget.
+Cold disks, antivirus, multiple findings and serialized contention can be slower;
+repeated per-finding calls in a batch can multiply the scan cost.
+No compaction or new storage feature was implemented in this review.
