@@ -10,6 +10,7 @@ import typer
 
 from aegis.assessment import AssessmentContext
 from aegis.finding_triage import FindingTriageManager
+from aegis.findings_report import (ReportFormat, build_report, render_json, render_markdown, write_report)
 from aegis.change_engine import ChangeEngine
 from aegis.change_history import (
     find_previous_comparable_result,
@@ -3721,6 +3722,26 @@ def findings_triage_history(
             f"{event.from_state.value} -> {event.to_state.value} "
             f"actor={event.actor} reason={event.reason}"
         )
+
+
+@findings_app.command("report")
+def findings_report(
+    format: ReportFormat = typer.Option(ReportFormat.JSON, "--format", help="Report format: json or markdown."),
+    output: Path | None = typer.Option(None, "--output", help="New output file; existing destinations are rejected."),
+):
+    """Export a validated findings snapshot without scans, recovery or state changes."""
+    try:
+        campaign = find_campaign()
+        if campaign is None:
+            raise LookupError("no AEGIS / ARGUS campaign found.")
+        report = build_report(campaign)
+        content = render_json(report) if format == ReportFormat.JSON else render_markdown(report)
+        if output is not None:
+            write_report(output, content, campaign=campaign)
+        else:
+            typer.echo(content, nl=False)
+    except (ValueError, LookupError, OSError, TypeError) as error:
+        _triage_error(str(error))
 
 
 if __name__ == "__main__":

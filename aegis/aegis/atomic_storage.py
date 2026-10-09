@@ -18,14 +18,17 @@ _local = threading.local()
 
 
 @contextmanager
-def directory_lock(directory: Path, *, timeout: float = 10):
+def directory_lock(directory: Path, *, timeout: float = 10, create: bool = True):
     """Reentrant per-thread, cooperative per-process lock; yields whether nested.
 
     SQLite is only a lock provider. No domain records are stored in this database.
     A lock is released by SQLite/OS after process death; no stale lock deletion.
+    create=False preserves missing directories/lock databases and refuses
+    pre-existing sidecars instead of allowing implicit metadata recovery.
     """
     directory = Path(directory).resolve()
-    directory.mkdir(parents=True, exist_ok=True)
+    if create:
+        directory.mkdir(parents=True, exist_ok=True)
     key = os.path.normcase(str(directory))
     # A fork inherits Python bookkeeping, not the parent's OS lock ownership.
     # Never reuse an inherited SQLite connection or claim child reentrancy.
@@ -38,10 +41,32 @@ def directory_lock(directory: Path, *, timeout: float = 10):
     if key in held:
         yield True
         return
+    lock_path = directory / ".aegis-lock.sqlite"
+    if not create:
+        sidecars = [directory / (lock_path.name + suffix)
+                    for suffix in ("-journal", "-wal", "-shm")]
+        # Opening a hot SQLite journal can perform implicit recovery. Reporting
+        # must preserve it instead, even if this conservatively rejects a busy
+        # writer. Same-thread reentrancy above has already been handled.
+        if any(path.exists() for path in sidecars):
+            raise StorageIntegrityError(
+                f"Busy or unsettled storage lock metadata for {directory}; "
+                "retry after the writer exits or inspect/recover separately")
+        if not lock_path.exists():
+            # Legacy directories have no cooperative writer until its lock
+            # appears. Never create operational files on the reporting path.
+            try:
+                yield False
+            finally:
+                if lock_path.exists() or any(path.exists() for path in sidecars):
+                    raise StorageIntegrityError(
+                        f"Storage changed during read-only snapshot: {directory}")
+            return
     connection = None
     try:
-        connection = sqlite3.connect(directory / ".aegis-lock.sqlite", timeout=timeout,
-                                     isolation_level=None)
+        target = lock_path if create else lock_path.as_uri() + "?mode=rw"
+        connection = sqlite3.connect(target, timeout=timeout,
+                                     isolation_level=None, uri=not create)
         connection.execute("BEGIN IMMEDIATE")
     except sqlite3.Error as error:
         if connection is not None:
