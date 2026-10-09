@@ -177,3 +177,39 @@ def test_state_failure_does_not_emit_event(setup, monkeypatch):
     with pytest.raises(OSError, match='state unavailable'):
         manager.acknowledge(record.finding_id, actor='carlos', reason='review')
     assert store.get(record.finding_id) == record and history.find() == []
+
+
+def test_reject_shared_state_and_audit_directory(setup):
+    store, _, _, _ = setup
+    with pytest.raises(ValueError, match='directories'):
+        FindingTriageManager(store, FindingTriageHistoryStore(store.path))
+
+
+@pytest.mark.parametrize('event_id', ['../escape', '', None])
+def test_history_rejects_unsafe_event_id(setup, event_id):
+    _, history, _, _ = setup
+    with pytest.raises(ValueError, match='event_id'):
+        history.get(event_id)
+
+
+def test_history_normalizes_timezone_and_rejects_naive_timestamp(setup):
+    _, history, record, manager = setup
+    manager.suppress(record.finding_id, actor='carlos', reason='review')
+    event = history.find()[0]
+    offset = timezone(timedelta(hours=2))
+    changed = replace(event, event_id='3' * 32, detected_at=event.detected_at.astimezone(offset))
+    history.save(changed)
+    assert history.get(changed.event_id).detected_at.utcoffset() == timedelta(0)
+    assert history.get(changed.event_id).detected_at == event.detected_at
+    with pytest.raises(ValueError, match='timezone-aware'):
+        history.save(replace(event, event_id='4' * 32, detected_at=datetime(2026, 1, 1)))
+    assert history.get('4' * 32) is None
+
+
+def test_corrupt_audit_is_reported_not_silently_skipped(setup):
+    _, history, record, manager = setup
+    manager.suppress(record.finding_id, actor='carlos', reason='review')
+    event = history.find()[0]
+    (history.directory / f'{event.event_id}.json').write_text('{')
+    with pytest.raises(json.JSONDecodeError):
+        history.find()

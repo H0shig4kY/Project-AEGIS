@@ -414,3 +414,23 @@ class FindingEvent:
                 self.plugin or "",
             ]
         )
+
+
+class FindingTriageEventType(str, Enum):
+    ACKNOWLEDGE = "acknowledge"
+    SUPPRESS = "suppress"
+    UNSUPPRESS = "unsuppress"
+
+
+@dataclass(frozen=True)
+class FindingTriageEvent:
+    """Operational audit event, independent of technical FindingEvent."""
+
+    event_id: str
+    finding_id: str
+    event_type: FindingTriageEventType
+    from_state: FindingTriageState
+    to_state: FindingTriageState
+    detected_at: datetime
+    actor: str
+    reason: str
