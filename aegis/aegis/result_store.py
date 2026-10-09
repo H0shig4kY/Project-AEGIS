@@ -1,3 +1,5 @@
+from aegis.atomic_storage import atomic_write_text, locked_directory
+
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +14,7 @@ class ResultStore:
             exist_ok=True,
         )
 
+    @locked_directory("directory")
     def save(self, result: PluginResult) -> Path:
         timestamp = datetime.now(
             timezone.utc
@@ -23,7 +26,7 @@ class ResultStore:
 
         path = self.directory / filename
 
-        path.write_text(
+        atomic_write_text(path,
             result.model_dump_json(indent=2),
             encoding="utf-8",
         )

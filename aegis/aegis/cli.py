@@ -3683,26 +3683,27 @@ def findings_triage_history(
     """Show operational audit events in chronological order."""
     try:
         context = _triage_context()
-        normalized = finding_id.strip()
-        if not re.fullmatch(r"[0-9a-f]{64}", normalized):
-            raise ValueError("finding_id must be a complete lowercase SHA-256 hex ID")
-        finding = context.findings.get(normalized)
-        if finding is None:
-            raise LookupError(f"Finding not found: {normalized}")
-        events = context.finding_triage_history.find_by_finding_id(finding.finding_id)
-        timeline = [
-            {
-                "event_id": event.event_id,
-                "finding_id": event.finding_id,
-                "event_type": event.event_type.value,
-                "from_state": event.from_state.value,
-                "to_state": event.to_state.value,
-                "detected_at": event.detected_at.isoformat(),
-                "actor": event.actor,
-                "reason": event.reason,
-            }
-            for event in events
-        ]
+        with context.findings.transaction():
+            normalized = finding_id.strip()
+            if not re.fullmatch(r"[0-9a-f]{64}", normalized):
+                raise ValueError("finding_id must be a complete lowercase SHA-256 hex ID")
+            finding = context.findings.get(normalized)
+            if finding is None:
+                raise LookupError(f"Finding not found: {normalized}")
+            events = context.finding_triage_history.find_by_finding_id(finding.finding_id)
+            timeline = [
+                {
+                    "event_id": event.event_id,
+                    "finding_id": event.finding_id,
+                    "event_type": event.event_type.value,
+                    "from_state": event.from_state.value,
+                    "to_state": event.to_state.value,
+                    "detected_at": event.detected_at.isoformat(),
+                    "actor": event.actor,
+                    "reason": event.reason,
+                }
+                for event in events
+            ]
     except (ValueError, LookupError, OSError, TypeError) as error:
         _triage_error(str(error))
     if json_output:

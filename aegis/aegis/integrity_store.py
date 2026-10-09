@@ -1,3 +1,5 @@
+from aegis.atomic_storage import atomic_write_text, locked_directory
+
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -31,15 +33,17 @@ class IntegrityStore:
             )
         )
 
+    @locked_directory("directory")
     def save(
         self,
         manifest: ResultIntegrityManifest,
     ) -> None:
-        self.path.write_text(
+        atomic_write_text(self.path,
             manifest.model_dump_json(indent=2),
             encoding="utf-8",
         )
 
+    @locked_directory("directory")
     def upsert(
         self,
         filename: str,
@@ -83,6 +87,7 @@ class IntegrityStore:
 
         return None
 
+    @locked_directory("directory")
     def mark_verified(
         self,
         filename: str,

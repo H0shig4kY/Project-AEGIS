@@ -1,3 +1,5 @@
+from aegis.atomic_storage import atomic_write_text, locked_directory
+
 import json
 import re
 from datetime import datetime, timezone
@@ -18,11 +20,11 @@ class FindingTriageHistoryStore:
             raise ValueError("event_id must be a UUID hex string")
         return self.directory / f"{event_id}.json"
 
-    def save(self, event: FindingTriageEvent) -> Path:
-        path = self._event_path(event.event_id)
+    @staticmethod
+    def _serialize(event: FindingTriageEvent) -> dict:
         if event.detected_at.tzinfo is None or event.detected_at.utcoffset() is None:
             raise ValueError("detected_at must be timezone-aware")
-        payload = {
+        return {
             "event_id": event.event_id,
             "finding_id": event.finding_id,
             "event_type": event.event_type.value,
@@ -32,20 +34,19 @@ class FindingTriageHistoryStore:
             "actor": event.actor,
             "reason": event.reason,
         }
-        content = json.dumps(payload, indent=2, sort_keys=True)
-        # Exclusive creation protects existing events against accidental overwrite.
-        with path.open("x", encoding="utf-8") as stream:
-            try:
-                stream.write(content)
-            except OSError:
-                path.unlink(missing_ok=True)
-                raise
+
+    @locked_directory("directory")
+    def save(self, event: FindingTriageEvent) -> Path:
+        path = self._event_path(event.event_id)
+        content = json.dumps(self._serialize(event), indent=2, sort_keys=True)
+        atomic_write_text(path, content, exclusive=True)
         return path
 
     def get(self, event_id: str) -> FindingTriageEvent | None:
         path = self._event_path(event_id)
         return self._load(path) if path.exists() else None
 
+    @locked_directory("directory")
     def find(self) -> list[FindingTriageEvent]:
         events = [self._load(path) for path in self.directory.glob("*.json")]
         return sorted(events, key=lambda event: (event.detected_at, event.event_id))

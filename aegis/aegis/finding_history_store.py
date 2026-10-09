@@ -1,3 +1,5 @@
+from aegis.atomic_storage import atomic_write_text, locked_directory, read_json, StorageIntegrityError
+
 import json
 
 from datetime import datetime
@@ -23,6 +25,7 @@ class FindingHistoryStore:
             exist_ok=True,
         )
 
+    @locked_directory("directory")
     def save(
         self,
         event: FindingEvent,
@@ -69,7 +72,12 @@ class FindingHistoryStore:
             ),
         }
 
-        path.write_text(
+        if path.exists():
+            if read_json(path) != payload:
+                raise StorageIntegrityError(f"Conflicting technical event: {path}")
+            return path
+
+        atomic_write_text(path,
             json.dumps(
                 payload,
                 indent=2,

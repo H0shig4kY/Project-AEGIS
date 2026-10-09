@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from aegis.atomic_storage import atomic_write_text, locked_directory
+
 import hashlib
 from pathlib import Path
 
@@ -93,6 +95,7 @@ class RelationStore:
         )
 
         relation.active = True
+    @locked_directory("directory")
     def save(
         self,
         relation: AssetRelation,
@@ -134,7 +137,7 @@ class RelationStore:
             relation
         )
 
-        path.write_text(
+        atomic_write_text(path,
             relation.model_dump_json(indent=2),
             encoding="utf-8",
         )
@@ -269,6 +272,7 @@ class RelationStore:
 
         return walked
 
+    @locked_directory("directory")
     def set_active(
         self,
         source_type: AssetType,
@@ -297,7 +301,7 @@ class RelationStore:
             ):
                 stored.active = active
 
-                path.write_text(
+                atomic_write_text(path,
                     stored.model_dump_json(
                         indent=2
                     ),

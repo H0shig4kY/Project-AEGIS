@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from aegis.atomic_storage import atomic_write_text, locked_directory
+
 import hashlib
 from pathlib import Path
 
@@ -77,6 +79,7 @@ class ChangeStore:
             f"{self._change_id(change)}.json"
         )
 
+    @locked_directory("directory")
     def save(
         self,
         change: ChangeRecord,
@@ -91,7 +94,7 @@ class ChangeStore:
             / self._filename(change)
         )
 
-        path.write_text(
+        atomic_write_text(path,
             change.model_dump_json(
                 indent=2
             ),

@@ -1,3 +1,5 @@
+from aegis.atomic_storage import directory_lock
+
 from aegis.change_state import (
     should_mark_relation_inactive,
 )
@@ -23,7 +25,11 @@ class RelationLifecycleManager:
         self.change_store = change_store
         self.threshold = threshold
 
-    def process_missing(
+    def process_missing(self, change: ChangeRecord) -> ChangeRecord | None:
+        with directory_lock(self.relation_store.directory):
+            return self._process_missing(change)
+
+    def _process_missing(
         self,
         change: ChangeRecord,
     ) -> ChangeRecord | None:

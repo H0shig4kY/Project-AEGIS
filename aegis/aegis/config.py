@@ -1,3 +1,5 @@
+from aegis.atomic_storage import atomic_write_text
+
 from pathlib import Path
 
 import yaml
@@ -14,5 +16,4 @@ class AegisConfig:
             "type": "pentest-campaign",
         }
 
-        with self.config_file.open("w", encoding="utf-8") as file:
-            yaml.safe_dump(config, file, sort_keys=False)
+        atomic_write_text(self.config_file, yaml.safe_dump(config, sort_keys=False))
