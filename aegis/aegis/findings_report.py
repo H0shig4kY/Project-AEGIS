@@ -50,7 +50,7 @@ def _history(directory, records, *, operational):
                 raise ValueError("event references a missing finding")
             _event_key(payload)  # Validate that the stored timestamp can be ordered.
             events[event.event_id] = payload
-        except (KeyError, TypeError, ValueError, AttributeError, OverflowError) as error:
+        except (KeyError, TypeError, ValueError, AttributeError, OverflowError, RecursionError) as error:
             raise StorageIntegrityError(f"Invalid history in {path}: {error}") from error
     return events
 
@@ -105,7 +105,7 @@ def build_report(campaign: CampaignContext, *, generated_at: datetime | None = N
                     raise ValueError("assessment configuration must be a mapping")
                 if "name" in config and config["name"] is not None and not isinstance(config["name"], str):
                     raise ValueError("assessment name must be a string or null")
-            except (yaml.YAMLError, ValueError, UnicodeError) as error:
+            except (yaml.YAMLError, ValueError, UnicodeError, RecursionError) as error:
                 raise StorageIntegrityError(f"Invalid assessment configuration: {error}") from error
             records = {}
             sources = {}
@@ -117,7 +117,7 @@ def build_report(campaign: CampaignContext, *, generated_at: datetime | None = N
                         raise ValueError("finding ID/filename mismatch")
                     records[record.finding_id] = record
                     sources[record.finding_id] = source
-                except (KeyError, TypeError, ValueError, AttributeError, OverflowError) as error:
+                except (KeyError, TypeError, ValueError, AttributeError, OverflowError, RecursionError) as error:
                     raise StorageIntegrityError(f"Invalid finding in {path}: {error}") from error
             technical = _history(campaign.finding_history_dir, records, operational=False)
             histories = {directory: _history(directory, records, operational=True)
@@ -153,7 +153,7 @@ def build_report(campaign: CampaignContext, *, generated_at: datetime | None = N
             # Validate the full export, including opaque extensions, before any output.
             try:
                 render_json(result)
-            except (ValueError, TypeError) as error:
+            except (ValueError, TypeError, RecursionError) as error:
                 raise StorageIntegrityError(f"Source data cannot be exported as strict UTF-8 JSON: {error}") from error
     return result
 

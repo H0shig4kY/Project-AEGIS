@@ -142,7 +142,7 @@ contain sensitive assessment content; consumers should treat it as source data.
 ## Validation
 
 Baseline: 585 Linux cases (582 passed, 3 platform skips on Windows).
-74 new functional cases were written before the associated implementation/fixes.
+79 new functional cases were written before the associated implementation/fixes.
 The initial red run failed because the reporting module did not yet exist;
 subsequent red runs reproduced nonfinite data, protected destinations and stream
 failure handling before correction. Coverage includes all nine state combinations,
@@ -159,3 +159,6 @@ only the regression tests, not the production CLI or JSON output.
 Numeric overflow in legacy finding counters and UTC conversion overflow in
 receipt/event timestamps are explicit integrity errors on this read path.
 Regression cases preserve the original sources and reject output in both formats.
+
+Excessive JSON/YAML nesting is an explicit integrity error. Regression tests
+use temporary inputs and a scoped recursion limit restored after each case.

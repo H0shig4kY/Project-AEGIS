@@ -39,6 +39,16 @@ def campaign(tmp_path, monkeypatch):
     return CampaignContext(root)
 
 
+@pytest.fixture
+def parser_limit():
+    previous = sys.getrecursionlimit()
+    sys.setrecursionlimit(1000)
+    try:
+        yield
+    finally:
+        sys.setrecursionlimit(previous)
+
+
 def finding(campaign, identifier='a', **fields):
     record = FindingRecord(finding_id=identifier * 64, rule_id='RULE', severity='medium',
         title='Exposure', description='Existing technical description',
@@ -152,7 +162,8 @@ def test_legacy_naive_technical_timestamp_is_preserved(campaign):
 
 
 @pytest.mark.parametrize('target', ['finding', 'technical', 'triage', 'journal', 'config'])
-def test_corrupt_sources_fail_without_repairs_or_partial_stdout(campaign, target):
+@pytest.mark.parametrize('deeply_nested', [False, True])
+def test_corrupt_sources_fail_without_repairs_or_partial_stdout(campaign, target, deeply_nested, parser_limit):
     record = finding(campaign)
     manager(campaign).suppress(record.finding_id, actor='operator', reason='review')
     paths = {'finding': campaign.findings_dir / f'{record.finding_id}.json',
@@ -161,7 +172,8 @@ def test_corrupt_sources_fail_without_repairs_or_partial_stdout(campaign, target
              'journal': next((campaign.findings_dir / '.triage-journal').glob('*.txn')),
              'config': campaign.config_file}
     paths[target].parent.mkdir(parents=True, exist_ok=True)
-    paths[target].write_text('{' if target != 'config' else '[')
+    content = '[' * 2000 + '0' + ']' * 2000 if deeply_nested else ('{' if target != 'config' else '[')
+    paths[target].write_text(content)
     before = snapshot(campaign.path)
     with pytest.raises(StorageIntegrityError):
         report(campaign)

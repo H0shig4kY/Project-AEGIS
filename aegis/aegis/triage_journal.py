@@ -364,8 +364,8 @@ def inspect_completed(directory):
     from types import SimpleNamespace
     try:
         entries = _entries(SimpleNamespace(path=Path(directory)))
-    except OverflowError as error:
-        raise StorageIntegrityError(f"Out-of-range triage journal data in {directory}: {error}") from error
+    except (OverflowError, RecursionError) as error:
+        raise StorageIntegrityError(f"Unsupported triage journal data in {directory}: {error}") from error
     for path, data in entries:
         if data["status"] not in {"done", "aborted"}:
             raise StorageIntegrityError(
