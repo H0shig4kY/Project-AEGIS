@@ -346,3 +346,235 @@ def test_real_cli_from_nested_directory(campaign):
     assert result.stderr == ''
     assert json.loads(result.stdout)['findings'][0]['record']['finding_id'] == record.finding_id
     assert snapshot(campaign.path) == before
+
+
+def test_report_avoids_normal_recovery_and_assessment_construction(campaign, monkeypatch):
+    finding(campaign)
+    def forbidden(*args, **kwargs):
+        raise AssertionError('report attempted a mutating read path')
+    monkeypatch.setattr(FindingStore, 'transaction', forbidden)
+    monkeypatch.setattr('aegis.cli.AssessmentContext', forbidden)
+    monkeypatch.setattr('aegis.cli.create_plugin_manager', forbidden)
+    assert cli().exit_code == 0
+
+
+@pytest.mark.parametrize('target', ['finding_id', 'event_id', 'orphan', 'triage_transition'])
+def test_invalid_source_identity_or_transition_is_explicit(campaign, target):
+    record = finding(campaign)
+    manager(campaign).suppress(record.finding_id, actor='operator', reason='review')
+    path = (campaign.findings_dir / f'{record.finding_id}.json' if target == 'finding_id'
+            else next(campaign.finding_triage_history_dir.glob('*.json')))
+    payload = json.loads(path.read_text())
+    if target == 'finding_id':
+        payload['finding_id'] = 'b' * 64
+    elif target == 'event_id':
+        payload['event_id'] = '0' * 32
+    elif target == 'orphan':
+        payload['finding_id'] = 'b' * 64
+    else:
+        payload['to_state'] = 'acknowledged'
+    path.write_text(json.dumps(payload))
+    before = snapshot(campaign.path)
+    with pytest.raises(StorageIntegrityError):
+        report(campaign)
+    assert snapshot(campaign.path) == before
+
+
+def test_integrity_error_prevents_destination_creation(campaign, tmp_path):
+    record = finding(campaign)
+    (campaign.findings_dir / f'{record.finding_id}.json').write_text('{')
+    destination = tmp_path / 'failed.json'
+    result = cli('--output', str(destination))
+    assert result.exit_code == 1 and result.stdout == ''
+    assert not destination.exists() and not list(tmp_path.glob('.failed.json.*.tmp'))
+
+
+def test_nonfinite_opaque_data_is_rejected_before_any_output(campaign):
+    record = finding(campaign)
+    path = campaign.findings_dir / f'{record.finding_id}.json'
+    payload = json.loads(path.read_text()); payload['unmodeled'] = float('nan')
+    path.write_text(json.dumps(payload))
+    before = snapshot(campaign.path)
+    with pytest.raises(StorageIntegrityError):
+        report(campaign)
+    for format in ('json', 'markdown'):
+        result = cli('--format', format)
+        assert result.exit_code == 1 and result.stdout == ''
+    assert snapshot(campaign.path) == before
+
+
+def test_export_stream_write_failure_cleans_up(campaign, tmp_path, monkeypatch):
+    import aegis.findings_report as reporting
+    destination = tmp_path / 'report.json'
+    original = os.fdopen
+    class BrokenStream:
+        def __init__(self, *args, **kwargs):
+            self.stream = original(*args, **kwargs)
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            self.stream.close()
+        def write(self, content):
+            self.stream.write(content[:10])
+            raise OSError('injected partial write')
+    monkeypatch.setattr(reporting.os, 'fdopen', BrokenStream)
+    with pytest.raises(OSError):
+        write_report(destination, render_json(report(campaign)), campaign=campaign)
+    assert not destination.exists() and not list(tmp_path.glob('.report.json.*.tmp'))
+
+
+@pytest.mark.parametrize('suffix', ['', '-journal', '-wal', '-shm'])
+def test_output_cannot_create_lock_database(campaign, suffix):
+    before = snapshot(campaign.path)
+    result = cli('--output', str(campaign.path / ('.aegis-lock.sqlite' + suffix)))
+    assert result.exit_code == 1 and result.stdout == ''
+    assert snapshot(campaign.path) == before
+
+
+def test_existing_read_lock_blocks_an_independent_writer(campaign):
+    finding(campaign)
+    before = snapshot(campaign.path)
+    code = '''
+import sys
+from pathlib import Path
+from aegis.atomic_storage import directory_lock, StorageIntegrityError
+try:
+    with directory_lock(Path(sys.argv[1]), timeout=0.05):
+        raise AssertionError('writer bypassed report lock')
+except StorageIntegrityError:
+    print('blocked')
+'''
+    with directory_lock(campaign.findings_dir, create=False):
+        process = subprocess.run([sys.executable, '-c', code, str(campaign.findings_dir)],
+                                 capture_output=True, text=True, timeout=30)
+        assert process.returncode == 0, process.stderr
+        assert process.stdout.strip() == 'blocked'
+    assert snapshot(campaign.path) == before
+
+
+def test_report_snapshot_blocks_triage_writer_until_read_finishes(campaign, monkeypatch):
+    import threading
+    from aegis import triage_journal
+    record = finding(campaign)
+    m = manager(campaign)
+    started = threading.Event()
+    finished = threading.Event()
+    errors = []
+    def writer():
+        started.set()
+        try:
+            m.suppress(record.finding_id, actor='operator', reason='concurrent review')
+        except BaseException as error:
+            errors.append(error)
+        finally:
+            finished.set()
+    original = triage_journal.inspect_completed
+    threads = []
+    def inspect(path):
+        thread = threading.Thread(target=writer)
+        threads.append(thread)
+        thread.start()
+        assert started.wait(timeout=2)
+        assert not finished.wait(timeout=0.05)
+        return original(path)
+    monkeypatch.setattr(triage_journal, 'inspect_completed', inspect)
+    try:
+        item = report(campaign)['findings'][0]
+        assert item['record']['triage_state'] == 'open' and item['triage_history'] == []
+    finally:
+        for thread in threads:
+            thread.join(timeout=5)
+            assert not thread.is_alive()
+    assert errors == []
+    assert FindingStore(campaign.findings_dir).get(record.finding_id).triage_state == FindingTriageState.SUPPRESSED
+
+
+def test_receipt_referencing_alternate_history_is_included(campaign):
+    record = finding(campaign)
+    alternate = campaign.data_dir / 'alternate_history'
+    m = FindingTriageManager(FindingStore(campaign.findings_dir), FindingTriageHistoryStore(alternate))
+    m.acknowledge(record.finding_id, actor='operator', reason='legacy location')
+    before = snapshot(campaign.path)
+    item = report(campaign)['findings'][0]
+    assert item['triage_history'][0]['reason'] == 'legacy location'
+    assert snapshot(campaign.path) == before
+
+
+def test_export_cannot_write_into_a_referenced_external_history(campaign, tmp_path):
+    record = finding(campaign)
+    external = tmp_path / 'external_history'
+    m = FindingTriageManager(FindingStore(campaign.findings_dir), FindingTriageHistoryStore(external))
+    m.acknowledge(record.finding_id, actor='operator', reason='external legacy location')
+    before = snapshot(tmp_path)
+    result = cli('--output', str(external / 'report.json'))
+    assert result.exit_code == 1 and result.stdout == ''
+    assert snapshot(tmp_path) == before
+
+
+def test_json_is_unicode_without_decorations_and_invalid_format_has_no_stdout(campaign):
+    record = finding(campaign)
+    path = campaign.findings_dir / f'{record.finding_id}.json'
+    payload = json.loads(path.read_text()); payload['title'] = 'Exposição — João'
+    path.write_text(json.dumps(payload))
+    result = cli('--format', 'json')
+    assert result.exit_code == 0 and result.stderr == ''
+    assert json.loads(result.stdout)['findings'][0]['record']['title'] == payload['title']
+    invalid = cli('--format', 'html')
+    assert invalid.exit_code == 2 and invalid.stdout == '' and invalid.stderr
+
+
+def test_markdown_empty_assessment_and_no_evidence_are_explicit(campaign):
+    assert 'Total: 0' in render_markdown(report(campaign))
+    finding(campaign)
+    item = report(campaign)['findings'][0]
+    assert 'evidence' not in item['record'] and item['source_extensions'] == {}
+    assert 'No recorded events.' in render_markdown(report(campaign))
+
+
+def test_corrupt_existing_lock_is_preserved_with_clean_error(campaign):
+    finding(campaign)
+    (campaign.findings_dir / '.aegis-lock.sqlite').write_bytes(b'corrupt lock database')
+    before = snapshot(campaign.path)
+    result = cli()
+    assert result.exit_code == 1 and result.stdout == '' and result.stderr
+    assert 'Traceback' not in result.output
+    assert snapshot(campaign.path) == before
+
+
+@pytest.mark.parametrize('suffix', ['-journal', '-wal', '-shm'])
+def test_abandoned_lock_sidecars_are_not_cleaned_by_reporting(campaign, suffix):
+    finding(campaign)
+    sidecar = campaign.findings_dir / ('.aegis-lock.sqlite' + suffix)
+    sidecar.write_bytes(b'potentially recoverable operational metadata')
+    before = snapshot(campaign.path)
+    result = cli()
+    assert result.exit_code == 1 and result.stdout == ''
+    assert snapshot(campaign.path) == before
+
+
+def test_reserved_lock_filename_is_case_insensitive(campaign):
+    before = snapshot(campaign.path)
+    result = cli('--output', str(campaign.path / '.AEGIS-LOCK.SQLITE'))
+    assert result.exit_code == 1 and result.stdout == ''
+    assert snapshot(campaign.path) == before
+
+
+def test_failed_stream_open_closes_descriptor_and_removes_temp(campaign, tmp_path, monkeypatch):
+    import aegis.findings_report as reporting
+    descriptors = []
+    original = reporting.tempfile.mkstemp
+    def allocate(*args, **kwargs):
+        descriptor, path = original(*args, **kwargs)
+        descriptors.append(descriptor)
+        return descriptor, path
+    def fail(*args, **kwargs):
+        raise OSError('injected stream-open failure')
+    monkeypatch.setattr(reporting.tempfile, 'mkstemp', allocate)
+    monkeypatch.setattr(reporting.os, 'fdopen', fail)
+    destination = tmp_path / 'report.json'
+    with pytest.raises(OSError):
+        write_report(destination, render_json(report(campaign)), campaign=campaign)
+    assert descriptors
+    with pytest.raises(OSError):
+        os.fstat(descriptors[0])
+    assert not destination.exists() and not list(tmp_path.glob('.report.json.*.tmp'))

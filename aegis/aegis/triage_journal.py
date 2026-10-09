@@ -353,3 +353,18 @@ def validate_save(store, record):
         else latest["event"]["to_state"])
     if latest and record.triage_state.value != expected:
         raise StorageIntegrityError(f"Refusing stale triage state write: {record.finding_id}")
+
+
+def inspect_completed(directory):
+    """Validate receipts without recovery, filesystem creation or cache reuse.
+
+    Caller holds the finding directory lock and must check corresponding events
+    and finding states before using the snapshot. Incomplete intents are errors.
+    """
+    from types import SimpleNamespace
+    entries = _entries(SimpleNamespace(path=Path(directory)))
+    for path, data in entries:
+        if data["status"] not in {"done", "aborted"}:
+            raise StorageIntegrityError(
+                f"Triage recovery required before reporting: {path}")
+    return entries

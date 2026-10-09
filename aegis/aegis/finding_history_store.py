@@ -138,8 +138,8 @@ class FindingHistoryStore:
             )
         ]
 
+    @staticmethod
     def _load(
-        self,
         path: Path,
     ) -> FindingEvent:
         payload = json.loads(
