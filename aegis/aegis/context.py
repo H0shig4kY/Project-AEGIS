@@ -32,6 +32,10 @@ class CampaignContext:
         )
 
     @property
+    def finding_triage_history_dir(self) -> Path:
+        return self.data_dir / "finding_triage_history"
+
+    @property
     def evidence_dir(self) -> Path:
         return self.path / "evidence"
 

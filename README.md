@@ -16,3 +16,10 @@ PowerShell
 Steganography
 Detection Engineering
 Red Team Research
+
+
+## Finding triage CLI
+
+Inside an assessment campaign, use `aegis findings acknowledge`, `suppress`,
+`unsuppress` and `triage-history`. State changes require `--actor` and `--reason`;
+all four commands support `--json`. See [usage and audit persistence](docs/finding-triage.md#cli-usage).
