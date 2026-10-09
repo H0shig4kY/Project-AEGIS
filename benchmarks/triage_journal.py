@@ -9,6 +9,7 @@ import cProfile
 import json
 import platform
 import statistics
+import subprocess
 import sys
 import tempfile
 import time
@@ -88,6 +89,22 @@ def main():
             repeats = [timed(lambda: store.get(record.finding_id))[1] for _ in range(args.repeats)]
             restarts = [timed(lambda: FindingStore(store.path).get(record.finding_id))[1]
                         for _ in range(3)]
+            # Actual process restarts: imports/startup are outside the query timer.
+            restart_code = """
+import sys, time
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from aegis.finding_store import FindingStore
+start = time.perf_counter()
+FindingStore(Path(sys.argv[2])).get(sys.argv[3])
+print((time.perf_counter() - start) * 1000)
+"""
+            process_restarts = []
+            for _ in range(3):
+                process = subprocess.run([sys.executable, "-c", restart_code,
+                    str(args.source.resolve()), str(store.path), record.finding_id],
+                    check=True, capture_output=True, text=True)
+                process_restarts.append(float(process.stdout.strip()))
             # Standalone recovery probe excludes finding-lock acquisition cost.
             with directory_lock(store.path):
                 _, recovery_ms = timed(lambda: triage_journal.recover(store))
@@ -121,6 +138,7 @@ def main():
                 event_validation=validate_ms, sort=sort_ms, global_chain=chain_ms,
                 atomic_write=write_ms, recovery=recovery_ms), first_query_ms=first_ms,
                 reopened_query_median_ms=statistics.median(restarts),
+                process_restart_query_median_ms=statistics.median(process_restarts),
                 repeated_query_median_ms=statistics.median(repeats),
                 transition_median_ms=statistics.median(transitions),
                 independent_transition_median_ms=statistics.median(independent),

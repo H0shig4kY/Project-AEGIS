@@ -68,25 +68,33 @@ from storage-integrity.md still apply.
 
 Final paired run: CPython 3.12.14, Linux x86_64, same benchmark script/fixture and
 environment before/after, warm OS filesystem cache. Seven samples per repeated
-query/transition and three fresh FindingStore samples. All times below are ms.
-The deterministic fixture has one finding, alternating valid transitions, all
-receipts done, and one persisted event per receipt. Production workloads with
-many findings, pending recovery or cold disks are not covered by these timings.
+query/transition; three fresh FindingStore samples and three actual new Python
+processes. Query timing in new processes excludes interpreter startup and imports.
+All times below are ms. The deterministic fixture has one finding, alternating
+valid transitions, all receipts done, and one persisted event per receipt.
+Production workloads with many findings, pending recovery or cold disks are
+not covered by these timings.
 
 | Receipts | Repeated query before → after | Speedup | Same-store transition before → after | Speedup |
 | --- | --- | --- | --- | --- |
-| 100 | 8.90 → 1.36 | 6.56× | 15.28 → 2.70 | 5.66× |
-| 1,000 | 84.90 → 12.85 | 6.61× | 135.11 → 14.23 | 9.49× |
-| 10,000 | 883.30 → 158.75 | 5.56× | 1,419.09 → 189.62 | 7.48× |
+| 100 | 8.36 → 1.67 | 4.99× | 15.01 → 3.86 | 3.88× |
+| 1,000 | 84.23 → 12.77 | 6.60× | 129.62 → 16.41 | 7.90× |
+| 10,000 | 881.35 → 162.86 | 5.41× | 1361.69 → 184.75 | 7.37× |
 
-| Receipts | First query in reopened store (median) before → after | Independent-store transition before → after |
+| Receipts | Reopened-store query before → after | Independent-store transition before → after |
 | --- | --- | --- |
-| 100 | 8.48 → 3.45 | 16.48 → 4.66 |
-| 1,000 | 84.47 → 32.08 | 135.54 → 33.61 |
-| 10,000 | 885.21 → 400.59 | 1,400.32 → 438.11 |
+| 100 | 8.41 → 3.23 | 15.58 → 5.58 |
+| 1,000 | 91.30 → 33.31 | 130.08 → 37.59 |
+| 10,000 | 876.56 → 416.69 | 1405.84 → 438.95 |
+
+| Receipts | First query after actual process restart before → after |
+| --- | --- |
+| 100 | 9.68 → 5.16 |
+| 1,000 | 82.29 → 33.76 |
+| 10,000 | 858.52 → 387.97 |
 
 At 10,000 receipts standalone warmed recovery (lock acquisition excluded) went
-from 894.45 to 157.97 ms. The full stage probes and cProfile data are retained in
+from 872.37 to 174.66 ms. Full stage probes and cProfile data are retained in
 benchmarks/results/sprint4-linux-before.json and sprint4-linux-after.json.
 The micro-stage probes deliberately parse/validate every payload even in the
 optimized source: they isolate unavoidable cold work, not warmed cache behavior.

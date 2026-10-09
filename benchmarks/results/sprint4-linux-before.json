@@ -8,237 +8,240 @@
     {
       "receipts": 100,
       "stages_ms": {
-        "read": 0.5472869999039176,
-        "parse": 0.3447110000251996,
-        "event_validation": 0.5424590000302487,
-        "sort": 0.012789000038537779,
-        "global_chain": 0.02756200001385878,
-        "atomic_write": 0.3685560000121768,
-        "recovery": 8.285314999966431
+        "read": 0.5479079998167435,
+        "parse": 0.40537199993195827,
+        "event_validation": 0.5450730000120529,
+        "sort": 0.014442000065173488,
+        "global_chain": 0.027370999987397227,
+        "atomic_write": 0.291670000024169,
+        "recovery": 9.47105799991732
       },
-      "first_query_ms": 8.916689999978189,
-      "reopened_query_median_ms": 8.478547000095205,
-      "repeated_query_median_ms": 8.900003000007928,
-      "transition_median_ms": 15.283006000004207,
-      "independent_transition_median_ms": 16.480694999927437,
+      "first_query_ms": 8.915439000020342,
+      "reopened_query_median_ms": 8.411237000018446,
+      "process_restart_query_median_ms": 9.679541999958019,
+      "repeated_query_median_ms": 8.357545999842841,
+      "transition_median_ms": 15.007312000079764,
+      "independent_transition_median_ms": 15.581448999910208,
       "profile_top_self": [
         {
-          "function": "<frozen posixpath>:join",
-          "calls": 1108,
-          "self_ms": 1.083
-        },
-        {
-          "function": "pathlib.py:_parse_path",
-          "calls": 707,
-          "self_ms": 1.065
-        },
-        {
-          "function": "<frozen posixpath>:_joinrealpath",
-          "calls": 201,
-          "self_ms": 0.969
-        },
-        {
-          "function": "pathlib.py:__str__",
-          "calls": 1213,
-          "self_ms": 0.906
+          "function": "<built-in method builtins.isinstance>",
+          "calls": 5536,
+          "self_ms": 2.732
         },
         {
           "function": "<built-in method _io.open>",
           "calls": 202,
-          "self_ms": 0.878
+          "self_ms": 1.298
+        },
+        {
+          "function": "<frozen posixpath>:join",
+          "calls": 1108,
+          "self_ms": 1.167
+        },
+        {
+          "function": "<frozen posixpath>:_joinrealpath",
+          "calls": 201,
+          "self_ms": 1.056
+        },
+        {
+          "function": "pathlib.py:_parse_path",
+          "calls": 707,
+          "self_ms": 1.049
+        },
+        {
+          "function": "pathlib.py:__str__",
+          "calls": 1213,
+          "self_ms": 0.932
         },
         {
           "function": "<built-in method posix.lstat>",
           "calls": 803,
-          "self_ms": 0.772
-        },
-        {
-          "function": "pathlib.py:__init__",
-          "calls": 906,
-          "self_ms": 0.719
+          "self_ms": 0.837
         },
         {
           "function": "<built-in method posix.stat>",
           "calls": 506,
-          "self_ms": 0.665
+          "self_ms": 0.736
+        },
+        {
+          "function": "pathlib.py:__init__",
+          "calls": 906,
+          "self_ms": 0.713
+        },
+        {
+          "function": "triage_journal.py:_decode_event",
+          "calls": 100,
+          "self_ms": 0.672
+        },
+        {
+          "function": "<built-in method posix.fspath>",
+          "calls": 3525,
+          "self_ms": 0.573
         },
         {
           "function": "pathlib.py:_load_parts",
           "calls": 706,
-          "self_ms": 0.529
-        },
-        {
-          "function": "<built-in method builtins.isinstance>",
-          "calls": 5536,
-          "self_ms": 0.517
-        },
-        {
-          "function": "triage_journal.py:_entries",
-          "calls": 1,
-          "self_ms": 0.504
-        },
-        {
-          "function": "pathlib.py:drive",
-          "calls": 806,
-          "self_ms": 0.496
+          "self_ms": 0.566
         }
       ]
     },
     {
       "receipts": 1000,
       "stages_ms": {
-        "read": 6.117640000070423,
-        "parse": 3.3038710000710125,
-        "event_validation": 5.197309999971367,
-        "sort": 0.1739030000180719,
-        "global_chain": 0.4613969999809342,
-        "atomic_write": 0.26215599996248784,
-        "recovery": 83.69072599998617
+        "read": 6.475211999941166,
+        "parse": 3.3260950001476886,
+        "event_validation": 5.139424000162762,
+        "sort": 0.13848899993718078,
+        "global_chain": 0.3139539999210683,
+        "atomic_write": 0.20576000019900675,
+        "recovery": 82.91743399990992
       },
-      "first_query_ms": 86.2772140000061,
-      "reopened_query_median_ms": 84.46883099998104,
-      "repeated_query_median_ms": 84.89864099999522,
-      "transition_median_ms": 135.10861299994303,
-      "independent_transition_median_ms": 135.5430900000556,
+      "first_query_ms": 81.64081599989004,
+      "reopened_query_median_ms": 91.3024219998988,
+      "process_restart_query_median_ms": 82.28949600015767,
+      "repeated_query_median_ms": 84.22690399993371,
+      "transition_median_ms": 129.6248349999587,
+      "independent_transition_median_ms": 130.08233699997618,
       "profile_top_self": [
-        {
-          "function": "<frozen posixpath>:join",
-          "calls": 11008,
-          "self_ms": 10.61
-        },
         {
           "function": "pathlib.py:_parse_path",
           "calls": 7007,
-          "self_ms": 10.521
+          "self_ms": 10.429
+        },
+        {
+          "function": "<frozen posixpath>:join",
+          "calls": 11008,
+          "self_ms": 10.416
         },
         {
           "function": "<built-in method _io.open>",
           "calls": 2002,
-          "self_ms": 10.242
+          "self_ms": 9.673
         },
         {
           "function": "<frozen posixpath>:_joinrealpath",
           "calls": 2001,
-          "self_ms": 9.531
+          "self_ms": 9.402
         },
         {
           "function": "pathlib.py:__str__",
           "calls": 12013,
-          "self_ms": 8.816
+          "self_ms": 8.74
         },
         {
           "function": "<built-in method posix.lstat>",
           "calls": 8003,
-          "self_ms": 8.241
+          "self_ms": 7.853
         },
         {
           "function": "<built-in method posix.stat>",
           "calls": 5006,
-          "self_ms": 7.248
+          "self_ms": 6.91
         },
         {
           "function": "pathlib.py:__init__",
           "calls": 9006,
-          "self_ms": 7.056
+          "self_ms": 6.885
         },
         {
           "function": "pathlib.py:_load_parts",
           "calls": 7006,
-          "self_ms": 5.588
-        },
-        {
-          "function": "triage_journal.py:_entries",
-          "calls": 1,
-          "self_ms": 5.445
+          "self_ms": 5.18
         },
         {
           "function": "<built-in method builtins.isinstance>",
           "calls": 55036,
-          "self_ms": 5.192
+          "self_ms": 5.175
         },
         {
-          "function": "<built-in method sys.intern>",
-          "calls": 26023,
-          "self_ms": 5.15
+          "function": "triage_journal.py:_entries",
+          "calls": 1,
+          "self_ms": 4.962
+        },
+        {
+          "function": "pathlib.py:drive",
+          "calls": 8006,
+          "self_ms": 4.439
         }
       ]
     },
     {
       "receipts": 10000,
       "stages_ms": {
-        "read": 68.08848900004705,
-        "parse": 33.64466000004995,
-        "event_validation": 52.38161299996591,
-        "sort": 2.4866160000556192,
-        "global_chain": 8.511897000062163,
-        "atomic_write": 0.2327710000145089,
-        "recovery": 894.4497510000247
+        "read": 67.33815899997353,
+        "parse": 34.79440399996747,
+        "event_validation": 59.14267799994377,
+        "sort": 2.001304000032178,
+        "global_chain": 8.565490000137288,
+        "atomic_write": 0.2301380000062636,
+        "recovery": 872.3743250000098
       },
-      "first_query_ms": 898.6600220000582,
-      "reopened_query_median_ms": 885.2146010000297,
-      "repeated_query_median_ms": 883.3017630000768,
-      "transition_median_ms": 1419.0870269999323,
-      "independent_transition_median_ms": 1400.3211460000102,
+      "first_query_ms": 910.3684430001522,
+      "reopened_query_median_ms": 876.556724000011,
+      "process_restart_query_median_ms": 858.5236440001154,
+      "repeated_query_median_ms": 881.3473210000211,
+      "transition_median_ms": 1361.6904980001436,
+      "independent_transition_median_ms": 1405.837320000046,
       "profile_top_self": [
-        {
-          "function": "<frozen posixpath>:join",
-          "calls": 110008,
-          "self_ms": 106.256
-        },
         {
           "function": "pathlib.py:_parse_path",
           "calls": 70007,
-          "self_ms": 105.7
+          "self_ms": 104.811
+        },
+        {
+          "function": "<frozen posixpath>:join",
+          "calls": 110008,
+          "self_ms": 103.843
         },
         {
           "function": "<built-in method _io.open>",
           "calls": 20002,
-          "self_ms": 99.607
+          "self_ms": 96.782
         },
         {
           "function": "<frozen posixpath>:_joinrealpath",
           "calls": 20001,
-          "self_ms": 97.155
+          "self_ms": 94.496
         },
         {
           "function": "pathlib.py:__str__",
           "calls": 120013,
-          "self_ms": 88.05
+          "self_ms": 89.113
         },
         {
           "function": "<built-in method posix.lstat>",
           "calls": 80003,
-          "self_ms": 79.26
+          "self_ms": 80.125
+        },
+        {
+          "function": "pathlib.py:__init__",
+          "calls": 90006,
+          "self_ms": 73.01
         },
         {
           "function": "<built-in method posix.stat>",
           "calls": 50006,
-          "self_ms": 71.416
-        },
-        {
-          "function": "pathlib.py:__init__",
-          "calls": 90006,
-          "self_ms": 70.437
+          "self_ms": 71.875
         },
         {
           "function": "triage_journal.py:_entries",
           "calls": 1,
-          "self_ms": 56.044
+          "self_ms": 54.721
         },
         {
           "function": "pathlib.py:_load_parts",
           "calls": 70006,
-          "self_ms": 53.765
+          "self_ms": 53.886
         },
         {
           "function": "<built-in method builtins.isinstance>",
           "calls": 550036,
-          "self_ms": 52.272
+          "self_ms": 51.854
         },
         {
           "function": "pathlib.py:__init__",
           "calls": 90006,
-          "self_ms": 45.114
+          "self_ms": 45.759
         }
       ]
     }
