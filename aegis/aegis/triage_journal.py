@@ -362,7 +362,10 @@ def inspect_completed(directory):
     and finding states before using the snapshot. Incomplete intents are errors.
     """
     from types import SimpleNamespace
-    entries = _entries(SimpleNamespace(path=Path(directory)))
+    try:
+        entries = _entries(SimpleNamespace(path=Path(directory)))
+    except OverflowError as error:
+        raise StorageIntegrityError(f"Out-of-range triage journal data in {directory}: {error}") from error
     for path, data in entries:
         if data["status"] not in {"done", "aborted"}:
             raise StorageIntegrityError(

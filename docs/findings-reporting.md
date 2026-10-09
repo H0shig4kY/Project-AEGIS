@@ -142,7 +142,7 @@ contain sensitive assessment content; consumers should treat it as source data.
 ## Validation
 
 Baseline: 585 Linux cases (582 passed, 3 platform skips on Windows).
-71 new functional cases were written before the associated implementation/fixes.
+74 new functional cases were written before the associated implementation/fixes.
 The initial red run failed because the reporting module did not yet exist;
 subsequent red runs reproduced nonfinite data, protected destinations and stream
 failure handling before correction. Coverage includes all nine state combinations,
@@ -155,3 +155,7 @@ Final Python 3.12/3.13 Linux and Windows outcomes are recorded in the PR after C
 CI also exposed ANSI styling within option names in Rich help output. Help
 assertions now strip ANSI sequences and cover both color settings. This changes
 only the regression tests, not the production CLI or JSON output.
+
+Numeric overflow in legacy finding counters and UTC conversion overflow in
+receipt/event timestamps are explicit integrity errors on this read path.
+Regression cases preserve the original sources and reject output in both formats.

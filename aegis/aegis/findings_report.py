@@ -48,8 +48,9 @@ def _history(directory, records, *, operational):
                 raise ValueError("event ID/filename mismatch")
             if event.finding_id not in records:
                 raise ValueError("event references a missing finding")
+            _event_key(payload)  # Validate that the stored timestamp can be ordered.
             events[event.event_id] = payload
-        except (KeyError, TypeError, ValueError, AttributeError) as error:
+        except (KeyError, TypeError, ValueError, AttributeError, OverflowError) as error:
             raise StorageIntegrityError(f"Invalid history in {path}: {error}") from error
     return events
 
@@ -116,7 +117,7 @@ def build_report(campaign: CampaignContext, *, generated_at: datetime | None = N
                         raise ValueError("finding ID/filename mismatch")
                     records[record.finding_id] = record
                     sources[record.finding_id] = source
-                except (KeyError, TypeError, ValueError, AttributeError) as error:
+                except (KeyError, TypeError, ValueError, AttributeError, OverflowError) as error:
                     raise StorageIntegrityError(f"Invalid finding in {path}: {error}") from error
             technical = _history(campaign.finding_history_dir, records, operational=False)
             histories = {directory: _history(directory, records, operational=True)

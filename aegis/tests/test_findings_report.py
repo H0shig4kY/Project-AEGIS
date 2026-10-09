@@ -172,7 +172,8 @@ def test_corrupt_sources_fail_without_repairs_or_partial_stdout(campaign, target
 
 
 @pytest.mark.parametrize('fault', ['pending', 'abort', 'missing_event', 'changed_event',
-                                 'divergent_state', 'contradictory_receipt', 'duplicate_sequence'])
+                                 'divergent_state', 'contradictory_receipt', 'duplicate_sequence',
+                                 'timestamp_overflow'])
 def test_journal_integrity_requires_explicit_recovery(campaign, fault):
     record = finding(campaign)
     m = manager(campaign)
@@ -182,6 +183,9 @@ def test_journal_integrity_requires_explicit_recovery(campaign, fault):
     event_path = next(campaign.finding_triage_history_dir.glob('*.json'))
     if fault in ('pending', 'abort'):
         receipt['status'] = fault
+        receipt_path.write_text(json.dumps(receipt))
+    elif fault == 'timestamp_overflow':
+        receipt['event']['detected_at'] = '0001-01-01T00:00:00+23:00'
         receipt_path.write_text(json.dumps(receipt))
     elif fault == 'missing_event':
         event_path.unlink()
@@ -393,10 +397,13 @@ def test_integrity_error_prevents_destination_creation(campaign, tmp_path):
     assert not destination.exists() and not list(tmp_path.glob('.failed.json.*.tmp'))
 
 
-def test_nonfinite_opaque_data_is_rejected_before_any_output(campaign):
+@pytest.mark.parametrize('field,value', [('unmodeled', float('nan')),
+                                       ('seen_count', float('inf')),
+                                       ('missing_count', float('inf'))])
+def test_nonfinite_opaque_data_is_rejected_before_any_output(campaign, field, value):
     record = finding(campaign)
     path = campaign.findings_dir / f'{record.finding_id}.json'
-    payload = json.loads(path.read_text()); payload['unmodeled'] = float('nan')
+    payload = json.loads(path.read_text()); payload[field] = value
     path.write_text(json.dumps(payload))
     before = snapshot(campaign.path)
     with pytest.raises(StorageIntegrityError):
