@@ -142,7 +142,7 @@ contain sensitive assessment content; consumers should treat it as source data.
 ## Validation
 
 Baseline: 585 Linux cases (582 passed, 3 platform skips on Windows).
-70 new functional cases were written before the associated implementation/fixes.
+71 new functional cases were written before the associated implementation/fixes.
 The initial red run failed because the reporting module did not yet exist;
 subsequent red runs reproduced nonfinite data, protected destinations and stream
 failure handling before correction. Coverage includes all nine state combinations,
@@ -151,3 +151,7 @@ schema stability, real subprocess CLI invocation, existing/concurrent destinatio
 partial write/fsync/publication failures, descriptors, integrity failures, source
 preservation and thread/process coordination. Timing is not an acceptance gate.
 Final Python 3.12/3.13 Linux and Windows outcomes are recorded in the PR after CI.
+
+CI also exposed ANSI styling within option names in Rich help output. Help
+assertions now strip ANSI sequences and cover both color settings. This changes
+only the regression tests, not the production CLI or JSON output.

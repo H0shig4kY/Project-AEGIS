@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import sys
 from dataclasses import replace
@@ -327,9 +328,12 @@ def test_missing_output_parent_is_not_created(campaign, tmp_path):
     assert not (tmp_path / 'missing').exists()
 
 
-def test_help_invalid_format_and_no_campaign(campaign, tmp_path, monkeypatch):
+@pytest.mark.parametrize('force_color', [False, True])
+def test_help_invalid_format_and_no_campaign(campaign, tmp_path, monkeypatch, force_color):
+    monkeypatch.setenv('FORCE_COLOR', '1' if force_color else '0')
     help_result = cli('--help')
-    assert help_result.exit_code == 0 and '--format' in help_result.output and '--output' in help_result.output
+    output = re.sub(r"\x1b\[[0-9;]*m", "", help_result.output)
+    assert help_result.exit_code == 0 and '--format' in output and '--output' in output
     assert cli('--format', 'html').exit_code == 2
     monkeypatch.chdir(tmp_path)
     result = cli('--format', 'json')
