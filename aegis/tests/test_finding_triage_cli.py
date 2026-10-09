@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 import sys
 from dataclasses import asdict, replace
@@ -42,13 +43,16 @@ def invoke(operation, finding_id, *extra):
 
 
 @pytest.mark.parametrize('operation', [*OPS, 'triage-history'])
-def test_command_help_without_campaign(tmp_path, monkeypatch, operation):
+@pytest.mark.parametrize('force_color', [False, True])
+def test_command_help_without_campaign(tmp_path, monkeypatch, operation, force_color):
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('FORCE_COLOR', '1' if force_color else '0')
     result = runner.invoke(app, ['findings', operation, '--help'])
     assert result.exit_code == 0
-    assert '--json' in result.output and 'finding_id' in result.output.lower()
+    output = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
+    assert '--json' in output and 'finding_id' in output.lower()
     if operation in OPS:
-        assert '--actor' in result.output and '--reason' in result.output
+        assert '--actor' in output and '--reason' in output
 
 
 @pytest.mark.parametrize('operation,previous,next_state', VALID)
