@@ -1,3 +1,5 @@
+from aegis.atomic_storage import atomic_write_text
+
 from pathlib import Path
 
 import yaml
@@ -19,8 +21,7 @@ class ScopeStorage:
             ]
         }
 
-        with self.path.open("w", encoding="utf-8") as file:
-            yaml.safe_dump(data, file, sort_keys=False)
+        atomic_write_text(self.path, yaml.safe_dump(data, sort_keys=False))
 
     def load(self) -> list[Target]:
         if not self.path.exists():

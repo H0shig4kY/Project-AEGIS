@@ -37,6 +37,14 @@ class FindingLifecycleManager:
         )
 
     def process(
+        self, current_findings: list[ExposureFinding], *,
+        observed_at: datetime | None = None, observed_plugin: str | None = None,
+    ) -> list[FindingRecord]:
+        with self.store.transaction():
+            return self._process(current_findings, observed_at=observed_at,
+                                 observed_plugin=observed_plugin)
+
+    def _process(
         self,
         current_findings: list[
             ExposureFinding

@@ -253,3 +253,182 @@ def test_legacy_json_without_journal(stores):
     assert store.get(record.finding_id).triage_state == FindingTriageState.OPEN
     manager.acknowledge(record.finding_id, actor='operator', reason='legacy')
     assert len(history.find()) == 1
+
+
+@pytest.mark.parametrize('phase', ['state', 'event'])
+def test_real_process_death_recovery(stores, phase):
+    store, history, record, _ = stores
+    code = '''
+import os, sys
+from pathlib import Path
+from aegis.finding_store import FindingStore
+from aegis.finding_triage_history_store import FindingTriageHistoryStore
+from aegis.finding_triage import FindingTriageManager
+store=FindingStore(Path(sys.argv[1])); history=FindingTriageHistoryStore(Path(sys.argv[2]))
+if sys.argv[3]=='state':
+ original=store.save
+ def die(record):
+  original(record); os._exit(19)
+ store.save=die
+else:
+ original=history.save
+ def die(event):
+  original(event); os._exit(19)
+ history.save=die
+FindingTriageManager(store,history).suppress('a'*64, actor='process',reason='crash test')
+'''
+    result = subprocess.run([sys.executable, '-c', code, str(store.path),
+        str(history.directory), phase], capture_output=True, timeout=30)
+    assert result.returncode == 19, result.stderr.decode()
+    assert FindingStore(store.path).get(record.finding_id).triage_state == FindingTriageState.SUPPRESSED
+    assert len(history.find()) == 1
+
+
+def test_stale_triage_record_write_rejected(stores):
+    store, _, record, manager = stores
+    manager.suppress(record.finding_id, actor='operator', reason='review')
+    with pytest.raises(StorageIntegrityError, match='stale'):
+        store.save(record)
+    assert store.get(record.finding_id).triage_state == FindingTriageState.SUPPRESSED
+
+
+def test_crash_during_abort_replayed(stores, monkeypatch):
+    store, history, record, manager = stores
+    from aegis import triage_journal
+    original_finish = triage_journal.finish
+    def fail(event):
+        raise OSError('audit failure')
+    def finish(path, data, status='done'):
+        original_finish(path, data, status)
+        if status == 'abort':
+            raise Crash()
+    monkeypatch.setattr(history, 'save', fail)
+    monkeypatch.setattr(triage_journal, 'finish', finish)
+    with pytest.raises(Crash):
+        manager.suppress(record.finding_id, actor='operator', reason='review')
+    monkeypatch.undo()
+    assert FindingStore(store.path).get(record.finding_id) == record
+    assert history.find() == []
+
+
+def test_recovery_failure_keeps_journal_and_retries(stores, monkeypatch):
+    store, history, record, manager = stores
+    def crash(value):
+        raise Crash()
+    monkeypatch.setattr(store, 'save', crash)
+    with pytest.raises(Crash):
+        manager.suppress(record.finding_id, actor='operator', reason='review')
+    monkeypatch.undo()
+    def fail(*args):
+        raise OSError('replace failure')
+    with monkeypatch.context() as patch:
+        patch.setattr(os, 'replace', fail)
+        with pytest.raises(OSError):
+            FindingStore(store.path).get(record.finding_id)
+    assert list((store.path / '.triage-journal').glob('*.txn'))
+    assert FindingStore(store.path).get(record.finding_id).triage_state == FindingTriageState.SUPPRESSED
+    assert len(history.find()) == 1
+
+
+def test_manifest_thread_updates_not_lost(tmp_path):
+    from datetime import datetime, timezone
+    from aegis.integrity_store import IntegrityStore
+    from aegis.models import IntegrityBaselineType
+    def write(index):
+        IntegrityStore(tmp_path).upsert(str(index), 'a'*64, IntegrityBaselineType.ORIGINAL,
+            datetime.now(timezone.utc))
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(write, range(20)))
+    assert len(IntegrityStore(tmp_path).load().results) == 20
+
+
+def test_asset_thread_provenance_not_lost(tmp_path):
+    from aegis.asset_store import AssetStore
+    from aegis.models import Asset, AssetProvenance
+    def write(index):
+        AssetStore(tmp_path).save(Asset(type=AssetType.SERVICE, value='test:80', source='service',
+            provenance=[AssetProvenance(plugin='service', observation_type='service',
+                target='test', observation_id=str(index))]))
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(write, range(20)))
+    assert len(AssetStore(tmp_path).find()[0].provenance) == 20
+
+
+def test_explicit_transaction_serializes_record_rmw(stores):
+    store, _, record, _ = stores
+    def increment(index):
+        reopened = FindingStore(store.path)
+        with reopened.transaction():
+            value = reopened.get(record.finding_id)
+            value.seen_count += 1
+            reopened.save(value)
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(increment, range(20)))
+    assert store.get(record.finding_id).seen_count == 20
+
+
+def test_fsync_and_same_directory_replace_order(tmp_path, monkeypatch):
+    path = tmp_path / 'record.json'
+    calls = []
+    original_sync = os.fsync
+    original_replace = os.replace
+    def sync(fd):
+        calls.append('sync')
+        return original_sync(fd)
+    def replace(source, target):
+        assert Path(source).parent == path.parent
+        assert calls == ['sync']
+        calls.append('replace')
+        return original_replace(source, target)
+    monkeypatch.setattr(os, 'fsync', sync)
+    monkeypatch.setattr(os, 'replace', replace)
+    atomic_write_text(path, '{"value": 1}')
+    assert calls == (['sync', 'replace', 'sync'] if os.name == 'posix' else ['sync', 'replace'])
+
+
+def test_interrupted_file_write_never_truncates_target(tmp_path, monkeypatch):
+    path = tmp_path / 'record.json'
+    path.write_text('{"old": true}')
+    original = os.fdopen
+    class Writer:
+        def __init__(self, stream):
+            self.stream = stream
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            self.stream.close()
+        def write(self, text):
+            self.stream.write(text[:2]); self.stream.flush()
+            raise OSError('interrupted write')
+    monkeypatch.setattr(os, 'fdopen', lambda *args, **kw: Writer(original(*args, **kw)))
+    with pytest.raises(OSError):
+        atomic_write_text(path, '{"new": true}')
+    assert json.loads(path.read_text()) == {'old': True}
+    assert list(tmp_path.glob('*.tmp'))
+
+@pytest.mark.parametrize('method', ['get', 'find'])
+def test_finding_filename_id_mismatch_preserved(stores, method):
+    store, _, record, _ = stores
+    path = store.path / f'{record.finding_id}.json'
+    payload = json.loads(path.read_text())
+    payload['finding_id'] = 'b' * 64
+    path.write_text(json.dumps(payload))
+    before = path.read_bytes()
+    with pytest.raises(StorageIntegrityError, match='ID mismatch'):
+        getattr(store, method)(*([record.finding_id] if method == 'get' else []))
+    assert path.read_bytes() == before
+
+
+def test_pending_conflicting_event_does_not_modify_finding(stores, monkeypatch):
+    store, history, record, manager = stores
+    monkeypatch.setattr(store, 'save', lambda value: (_ for _ in ()).throw(Crash()))
+    with pytest.raises(Crash):
+        manager.suppress(record.finding_id, actor='operator', reason='review')
+    receipt = json.loads(next((store.path / '.triage-journal').glob('*.txn')).read_text())
+    path = history.directory / (receipt['event']['event_id'] + '.json')
+    path.write_text('{}')
+    monkeypatch.undo()
+    with pytest.raises(StorageIntegrityError, match='Conflicting'):
+        FindingStore(store.path).get(record.finding_id)
+    assert json.loads((store.path / f'{record.finding_id}.json').read_text())['triage_state'] == 'open'
+    assert path.read_text() == '{}'

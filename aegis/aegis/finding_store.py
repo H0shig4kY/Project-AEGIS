@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
+
+from aegis.atomic_storage import (
+    atomic_write_text, directory_lock, read_json, StorageIntegrityError,
+)
 
 from pathlib import Path
 
@@ -32,6 +37,29 @@ class FindingStore:
             parents=True,
             exist_ok=True,
         )
+
+    @contextmanager
+    def transaction(self):
+        """Cooperative finding read/modify/write scope with journal recovery."""
+        with directory_lock(self.path) as nested:
+            if not nested:
+                from aegis.triage_journal import recover
+                recover(self)
+            yield
+
+    def save(self, record: FindingRecord) -> Path:
+        with self.transaction():
+            from aegis.triage_journal import validate_save
+            validate_save(self, record)
+            return self._save(record)
+
+    def get(self, finding_id: str) -> FindingRecord | None:
+        with self.transaction():
+            return self._get(finding_id)
+
+    def find(self) -> list[FindingRecord]:
+        with self.transaction():
+            return self._find()
 
     # -------------------------------------------------
     # SERIALIZATION
@@ -238,7 +266,7 @@ class FindingStore:
     # SAVE
     # -------------------------------------------------
 
-    def save(
+    def _save(
         self,
         record: FindingRecord,
     ) -> Path:
@@ -246,11 +274,14 @@ class FindingStore:
             record.finding_id
         )
 
+        if path.exists():
+            self._get(record.finding_id)
+
         payload = self._serialize(
             record
         )
 
-        path.write_text(
+        atomic_write_text(path,
             json.dumps(
                 payload,
                 indent=2,
@@ -265,7 +296,7 @@ class FindingStore:
     # GET
     # -------------------------------------------------
 
-    def get(
+    def _get(
         self,
         finding_id: str,
     ) -> FindingRecord | None:
@@ -277,26 +308,18 @@ class FindingStore:
             return None
 
         try:
-            data = json.loads(
-                path.read_text(
-                    encoding="utf-8",
-                )
-            )
-        except (
-            OSError,
-            json.JSONDecodeError,
-        ):
-            return None
-
-        return self._deserialize(
-            data
-        )
+            record = self._deserialize(read_json(path))
+            if record.finding_id != finding_id:
+                raise ValueError("Finding ID mismatch")
+            return record
+        except (KeyError, TypeError, ValueError, AttributeError) as error:
+            raise StorageIntegrityError(f"Invalid finding in {path}: {error}") from error
 
     # -------------------------------------------------
     # FIND
     # -------------------------------------------------
 
-    def find(
+    def _find(
         self,
     ) -> list[FindingRecord]:
         records: list[
@@ -306,36 +329,14 @@ class FindingStore:
         if not self.path.exists():
             return records
 
-        for path in sorted(
-            self.path.glob(
-                "*.json"
-            )
-        ):
+        for path in sorted(self.path.glob("*.json")):
             try:
-                data = json.loads(
-                    path.read_text(
-                        encoding="utf-8",
-                    )
-                )
-
-                record = (
-                    self._deserialize(
-                        data
-                    )
-                )
-
-            except (
-                OSError,
-                json.JSONDecodeError,
-                KeyError,
-                TypeError,
-                ValueError,
-            ):
-                continue
-
-            records.append(
-                record
-            )
+                record = self._deserialize(read_json(path))
+                if record.finding_id != path.stem:
+                    raise ValueError("Finding ID mismatch")
+            except (KeyError, TypeError, ValueError, AttributeError) as error:
+                raise StorageIntegrityError(f"Invalid finding in {path}: {error}") from error
+            records.append(record)
 
         return records
 

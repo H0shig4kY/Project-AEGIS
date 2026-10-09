@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from aegis.atomic_storage import atomic_write_text, locked_directory
+
 from pathlib import Path
 
 from aegis.models import (
@@ -175,6 +177,7 @@ class AssetStore:
 
         asset.active = True
 
+    @locked_directory("directory")
     def save(self, asset: Asset) -> Path:
         self.directory.mkdir(
             parents=True,
@@ -302,7 +305,7 @@ class AssetStore:
                     asset
                 )
 
-        path.write_text(
+        atomic_write_text(path,
             asset.model_dump_json(indent=2),
             encoding="utf-8",
         )
@@ -343,6 +346,7 @@ class AssetStore:
 
         return assets
 
+    @locked_directory("directory")
     def set_active(
         self,
         asset_type: AssetType,
@@ -358,7 +362,7 @@ class AssetStore:
             ):
                 asset.active = active
 
-                path.write_text(
+                atomic_write_text(path,
                     asset.model_dump_json(
                         indent=2
                     ),

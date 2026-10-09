@@ -18,11 +18,12 @@ permissions:
 jobs:
   tests:
     name: Python tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
 
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest]
         python-version:
           - "3.12"
           - "3.13"
@@ -38,7 +39,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          os: [ubuntu-latest, windows-latest]
+        python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: aegis/pyproject.toml
 

@@ -51,3 +51,68 @@ get/save calls need an explicit transaction context. Legacy JSON with no journal
 receipt remains readable but a historical event never recorded cannot be invented.
 Corrupt existing records and journals must be retained and explicitly reported.
 Abandoned temporary files are ignored and not automatically deleted on startup.
+
+## Implemented guarantees
+
+All existing JSON store publication, scope YAML and configuration creation use
+same-directory temporary files. The order is write, flush, file fsync, replace,
+then directory fsync on POSIX. Journal directory creation also syncs its parent.
+A failure before replace leaves the previous target intact. A sync error after
+replace may mean the new target is already visible: it is not a rollback.
+Temps end in .tmp and are excluded from record and receipt enumeration.
+
+Asset/relation provenance updates, integrity manifest updates and lifecycle
+read/modify/write operations are serialized. FindingStore.transaction() is an
+additive context manager for callers needing a complete read/modify/write scope.
+The lock order in internal triage is findings, then history or journal; history
+store methods do not acquire the finding lock. Callers must follow that order.
+Independent get/save sequences without the context are not protected as a unit.
+
+Triage receipts are ordered by a sequence assigned under the finding lock.
+Recovery validates receipts, completes pending operations, retries recorded aborts,
+restores missing receipted events and checks the latest committed triage state.
+Conflicting existing events are checked before pending state publication.
+Stale triage-state saves are rejected. State recovery changes only triage_state,
+preserving technical and unknown JSON fields. Finding ID/filename mismatches,
+invalid finding JSON/schema and invalid journals raise StorageIntegrityError.
+This intentionally replaces FindingStore's previous silent skip/missing behavior.
+Public command schemas and persisted domain record formats remain unchanged.
+
+## Recovery procedure
+
+A normal FindingStore.get/find/save or triage CLI operation triggers recovery.
+The triage-history CLI reads the finding and operational events in the same scope.
+A process crash with a pending intent is completed forward, even if the original
+caller never received success. An ordinary OSError with no published event
+records an abort before restoration; a published event forces completion.
+After an error, inspect/recover before retrying rather than assume it failed.
+
+For an integrity error:
+1. Stop cooperating writers and retain a copy of the entire assessment, including
+   hidden journals/lock files, events and abandoned temps.
+2. Inspect the explicit file path in the error. Do not delete journals or replace
+   corrupt records automatically. Compare backup and temporary files offline.
+3. Restore only verified data with operator approval, then reopen the store.
+   Missing events with retained valid receipts are reconstructed automatically.
+   Missing findings and conflicting data require operator intervention.
+4. Verify triage state and history before resuming operations.
+
+The lock database stores no domain data. Do not remove it while writers run.
+A lock timeout is an explicit error, not an instruction to delete a stale lock.
+
+## Evidence and residual risks
+
+Regression tests inject failures in write/fsync/replace, state/event/receipt and
+abort phases; restart stores; kill real subprocesses; check lock release/timeouts;
+and exercise thread/process contention. CI tests Python 3.12 and 3.13 on Linux
+and Windows. These are process-interruption tests, not physical power-cut tests.
+
+Receipts are retained indefinitely and scanned on each outer finding operation;
+compaction/indexing is outside scope. Raw readers can observe intermediate files.
+Manual edits, removed receipts, filesystem aliases and noncooperating writers can
+bypass guarantees. Legacy missing events cannot be inferred. Technical history and
+other multi-file flows remain nontransactional. Records are neither authenticated
+nor cryptographically tamper-evident. Network filesystems are not a tested deployment
+target. Filesystem fsync/replace guarantees and hardware behavior limit durability;
+Windows has no portable directory fsync. No unconditional power-loss guarantee
+or campaign-wide ACID transaction is claimed.

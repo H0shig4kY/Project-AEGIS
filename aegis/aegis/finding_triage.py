@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from aegis.finding_store import FindingStore
+from aegis import triage_journal
 from aegis.finding_triage_history_store import FindingTriageHistoryStore
 from aegis.models import (
     FindingRecord, FindingTriageEvent, FindingTriageEventType, FindingTriageState,
@@ -17,7 +18,7 @@ class FindingTriageManager:
     """Manage triage without changing technical lifecycle fields.
 
     Calls require a complete SHA-256 finding ID. Audit persistence is mandatory.
-    This manager follows the existing single-writer JSON store model.
+    Cooperating writers use the finding lock and a retained recovery journal.
     """
 
     def __init__(self, store: FindingStore, history_store: FindingTriageHistoryStore):
@@ -45,7 +46,11 @@ class FindingTriageManager:
             raise ValueError(f"{field} must be a non-empty string")
         return value.strip()
 
-    def _transition(
+    def _transition(self, finding_id, actor, reason, operation, allowed, next_state):
+        with self.store.transaction():
+            return self._apply_transition(finding_id, actor, reason, operation, allowed, next_state)
+
+    def _apply_transition(
         self, finding_id: str, actor: str, reason: str,
         operation: FindingTriageEventType, allowed: tuple[FindingTriageState, ...],
         next_state: FindingTriageState,
@@ -68,13 +73,15 @@ class FindingTriageManager:
             from_state=previous, to_state=next_state,
             detected_at=datetime.now(timezone.utc), actor=actor, reason=reason,
         )
-        record.triage_state = next_state
-        self.store.save(record)
+        path, intent = triage_journal.begin(self.store, self.history_store, event)
         try:
-            self.history_store.save(event)
-        except OSError:
-            # Best-effort compensation; two JSON files are not a transaction.
-            record.triage_state = previous
+            record.triage_state = next_state
             self.store.save(record)
+            self.history_store.save(event)
+            triage_journal.finish(path, intent)
+        except OSError:
+            # A persisted decision can be replayed after another interruption.
+            # Published events are never removed; leave them pending for recovery.
+            triage_journal.abort(self.store, path, intent)
             raise
         return record

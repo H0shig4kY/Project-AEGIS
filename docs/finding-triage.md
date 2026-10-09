@@ -53,12 +53,11 @@ Events sort by timestamp, then ID; equal timestamps have deterministic ordering,
 which does not imply causal ordering. Corrupt audit files raise errors rather
 than being silently omitted.
 
-The manager writes state first and then the event. If audit writing raises an
-`OSError`, it attempts to restore the previous operational state and propagates
-the error. This is best-effort compensation, not a multi-file transaction.
-A crash, partial disk write or failed rollback can leave inconsistency. There is
-no locking between concurrent triage or technical lifecycle writers. Use a
-single writer; crash recovery and concurrency control are outside this sprint.
+The manager records a retained intent before state and event publication. Finding
+store operations recover interrupted intents under a cooperative directory lock;
+technical lifecycle updates use the same lock. Published events are never removed
+during error handling. See [storage integrity and recovery](storage-integrity.md)
+for failure semantics, operator recovery and limits.
 
 The actor is supplied by the caller, not authenticated by this component. JSON
 audit files are not cryptographically tamper-evident and contain actor/reason
