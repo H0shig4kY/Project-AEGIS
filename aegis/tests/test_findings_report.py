@@ -1,4 +1,5 @@
 import json
+import errno
 import os
 import re
 import subprocess
@@ -601,3 +602,77 @@ def test_failed_stream_open_closes_descriptor_and_removes_temp(campaign, tmp_pat
     with pytest.raises(OSError):
         os.fstat(descriptors[0])
     assert not destination.exists() and not list(tmp_path.glob('.report.json.*.tmp'))
+
+
+@pytest.mark.parametrize('target', ['findings', 'finding_history', 'finding_triage_history'])
+@pytest.mark.parametrize('failure', ['permission', 'during_iteration'])
+@pytest.mark.parametrize('format', ['json', 'markdown'])
+def test_enumeration_failure_prevents_incomplete_report(campaign, tmp_path, monkeypatch, target, failure, format):
+    finding(campaign)
+    directory = campaign.data_dir / target
+    directory.mkdir(exist_ok=True)
+    before = snapshot(campaign.path)
+    original = os.scandir
+    class InterruptedScan:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+        def __iter__(self):
+            raise OSError('injected enumeration failure')
+    def scan(path):
+        if Path(path) == directory:
+            if failure == 'permission':
+                raise PermissionError('injected denied enumeration')
+            return InterruptedScan()
+        return original(path)
+    destination = tmp_path / 'report.txt'
+    with monkeypatch.context() as scoped:
+        scoped.setattr(os, 'scandir', scan)
+        result = cli('--format', format, '--output', str(destination))
+    assert result.exit_code == 1 and result.stdout == ''
+    assert 'enumeration' in result.stderr and 'Traceback' not in result.output
+    assert not destination.exists()
+    assert snapshot(campaign.path) == before
+
+
+@pytest.mark.parametrize('failure', ['missing_after_open', 'not_directory'])
+def test_enumeration_errors_are_not_normal_absence(campaign, monkeypatch, failure):
+    finding(campaign)
+    original = os.scandir
+    class VanishedScan:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+        def __iter__(self):
+            raise FileNotFoundError('directory vanished during enumeration')
+    def scan(path):
+        if Path(path) == campaign.findings_dir:
+            if failure == 'not_directory':
+                raise NotADirectoryError('invalid storage directory')
+            return VanishedScan()
+        return original(path)
+    with monkeypatch.context() as scoped:
+        scoped.setattr(os, 'scandir', scan)
+        result = cli()
+    assert result.exit_code == 1 and result.stdout == '' and result.stderr
+
+
+@pytest.mark.parametrize('legacy_runtime', [False, True])
+def test_output_symlink_loop_is_a_controlled_cli_error(campaign, tmp_path, monkeypatch, legacy_runtime):
+    destination = tmp_path / 'loop'
+    before = snapshot(campaign.path)
+    original = Path.resolve
+    def resolve(path, *args, **kwargs):
+        if path == destination:
+            if legacy_runtime:
+                raise RuntimeError(f'Symlink loop from {str(path)!r}')
+            raise OSError(errno.ELOOP, 'Too many levels of symbolic links', str(path))
+        return original(path, *args, **kwargs)
+    monkeypatch.setattr(Path, 'resolve', resolve)
+    result = cli('--output', str(destination))
+    assert result.exit_code == 1 and result.stdout == ''
+    assert 'symlink' in result.stderr.lower() and 'Traceback' not in result.output
+    assert not destination.exists() and not list(tmp_path.glob('.loop.*.tmp'))
+    assert snapshot(campaign.path) == before
