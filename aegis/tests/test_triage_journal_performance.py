@@ -179,3 +179,170 @@ def test_invalid_snapshot_can_be_repaired_without_stale_cache(campaign):
     assert store.get(record.finding_id).triage_state == FindingTriageState.SUPPRESSED
     reopened = FindingStore(store.path)
     assert reopened.get(record.finding_id).triage_state == FindingTriageState.SUPPRESSED
+
+
+@pytest.mark.parametrize("count", [0, 2, 100, 1000])
+def test_legacy_receipt_volumes_reopen_and_repeat(campaign, count):
+    store, history, record, _ = campaign
+    directory = store.path / ".triage-journal"
+    directory.mkdir()
+    for index in range(count):
+        event = dict(event_id=f"{index:032x}", finding_id=record.finding_id,
+            event_type="suppress" if index % 2 == 0 else "unsuppress",
+            from_state="open" if index % 2 == 0 else "suppressed",
+            to_state="suppressed" if index % 2 == 0 else "open",
+            detected_at="2026-10-09T00:00:00+00:00", actor="operator", reason="review")
+        (history.directory / (event["event_id"] + ".json")).write_text(json.dumps(event))
+        (directory / (event["event_id"] + ".txn")).write_text(json.dumps(dict(
+            version=1, sequence=index + 1, status="done", history_directory="../triage", event=event)))
+    before = {path.name: path.read_bytes() for path in directory.glob("*.txn")}
+    for current in (store, store, FindingStore(store.path)):
+        assert current.get(record.finding_id).triage_state == FindingTriageState.OPEN
+        assert len(history.find()) == count
+    assert {path.name: path.read_bytes() for path in directory.glob("*.txn")} == before
+
+
+def test_failed_derived_snapshot_build_is_retryable(campaign, monkeypatch):
+    store, history, record, manager = campaign
+    manager.suppress(record.finding_id, actor="operator", reason="review")
+    store.get(record.finding_id)
+    other = FindingTriageManager(FindingStore(store.path), history)
+    other.unsuppress(record.finding_id, actor="operator", reason="review")
+    original = {path.name: path.read_bytes() for path in receipts(store)}
+    monkeypatch.setattr(triage_journal, "_summarize",
+                        lambda entries: (_ for _ in ()).throw(MemoryError("derived snapshot")))
+    with pytest.raises(MemoryError, match="derived snapshot"):
+        store.get(record.finding_id)
+    assert getattr(store, "_triage_view", None) is None
+    assert {path.name: path.read_bytes() for path in receipts(store)} == original
+    monkeypatch.undo()
+    assert store.get(record.finding_id).triage_state == FindingTriageState.OPEN
+    assert len(history.find()) == 2
+
+
+def test_discarded_cache_is_reconstructed(campaign):
+    store, history, record, manager = campaign
+    manager.suppress(record.finding_id, actor="operator", reason="review")
+    store.get(record.finding_id)
+    store._triage_cache = None
+    assert store.get(record.finding_id).triage_state == FindingTriageState.SUPPRESSED
+    assert len(history.find()) == 1
+
+
+@pytest.mark.parametrize("phase", ["pending", "abort", "published"])
+def test_interrupted_recovery_does_not_poison_warm_cache(campaign, monkeypatch, phase):
+    store, history, record, manager = campaign
+    manager.suppress(record.finding_id, actor="operator", reason="review")
+    store.get(record.finding_id)
+    original_save = store.save
+    original_history = history.save
+    class Crash(BaseException):
+        pass
+    if phase == "pending":
+        def save(value):
+            original_save(value)
+            raise Crash()
+        monkeypatch.setattr(store, "save", save)
+    elif phase == "published":
+        def save_event(value):
+            original_history(value)
+            raise Crash()
+        monkeypatch.setattr(history, "save", save_event)
+    else:
+        monkeypatch.setattr(history, "save", lambda event: (_ for _ in ()).throw(OSError("audit")))
+        original_finish = triage_journal.finish
+        def finish(path, data, status="done"):
+            original_finish(path, data, status)
+            if status == "abort":
+                raise Crash()
+        monkeypatch.setattr(triage_journal, "finish", finish)
+    with pytest.raises(Crash):
+        manager.unsuppress(record.finding_id, actor="operator", reason="review")
+    assert getattr(store, "_triage_view", None) is None
+    monkeypatch.undo()
+    expected = FindingTriageState.SUPPRESSED if phase == "abort" else FindingTriageState.OPEN
+    for _ in range(3):
+        assert store.get(record.finding_id).triage_state == expected
+    assert len(history.find()) == (1 if phase == "abort" else 2)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="portable symlink privilege unavailable on Windows")
+def test_history_symlink_target_is_resolved_again_after_cache(campaign):
+    store, history, record, manager = campaign
+    manager.suppress(record.finding_id, actor="operator", reason="review")
+    alias = store.path.parent / "history-alias"
+    alias.symlink_to(history.directory, target_is_directory=True)
+    path = receipts(store)[0]
+    data = json.loads(path.read_text())
+    data["history_directory"] = "../history-alias"
+    path.write_text(json.dumps(data))
+    store.get(record.finding_id)
+    other = store.path.parent / "other-history"
+    other.mkdir()
+    event = dict(data["event"], reason="changed")
+    (other / (event["event_id"] + ".json")).write_text(json.dumps(event))
+    alias.unlink()
+    alias.symlink_to(other, target_is_directory=True)
+    with pytest.raises(StorageIntegrityError, match="Conflicting"):
+        store.get(record.finding_id)
+
+
+def test_multiple_findings_keep_independent_latest_states(campaign):
+    store, history, record, manager = campaign
+    other = FindingRecord(finding_id="b" * 64, rule_id="TEST", severity="medium",
+        title="other", description="test", asset_type=AssetType.SERVICE, asset_value="other:80")
+    store.save(other)
+    manager.suppress(record.finding_id, actor="operator", reason="review")
+    manager.acknowledge(other.finding_id, actor="operator", reason="review")
+    store.get(record.finding_id)
+    manager.unsuppress(record.finding_id, actor="operator", reason="review")
+    for _ in range(3):
+        assert store.get(record.finding_id).triage_state == FindingTriageState.OPEN
+        assert store.get(other.finding_id).triage_state == FindingTriageState.ACKNOWLEDGED
+    assert len(history.find()) == 3
+
+
+@pytest.mark.skipif(os.name != "posix", reason="fork is POSIX only")
+def test_fork_discards_inherited_validated_cache(campaign):
+    store, history, record, manager = campaign
+    manager.suppress(record.finding_id, actor="operator", reason="review")
+    code = """
+import os, sys
+from pathlib import Path
+from aegis import triage_journal
+from aegis.finding_store import FindingStore
+store = FindingStore(Path(sys.argv[1]))
+store.get(sys.argv[2])
+pid = os.fork()
+if pid == 0:
+    def must_reparse(payload):
+        raise RuntimeError("fresh child validation")
+    triage_journal._decode_event = must_reparse
+    try:
+        store.get(sys.argv[2])
+    except RuntimeError as error:
+        os._exit(0 if str(error) == "fresh child validation" else 9)
+    os._exit(8)
+_, status = os.waitpid(pid, 0)
+assert os.waitstatus_to_exitcode(status) == 0
+store.get(sys.argv[2])
+"""
+    result = subprocess.run([sys.executable, "-c", code, str(store.path), record.finding_id],
+                            capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert len(history.find()) == 1
+
+
+def test_warm_snapshot_does_not_override_technical_fields(campaign):
+    store, history, record, manager = campaign
+    manager.suppress(record.finding_id, actor="operator", reason="review")
+    store.get(record.finding_id)
+    with FindingStore(store.path).transaction():
+        current = FindingStore(store.path).get(record.finding_id)
+        current.seen_count = 42
+        current.missing_count = 7
+        FindingStore(store.path).save(current)
+    manager.unsuppress(record.finding_id, actor="operator", reason="review")
+    current = store.get(record.finding_id)
+    assert (current.seen_count, current.missing_count) == (42, 7)
+    assert len(history.find()) == 2

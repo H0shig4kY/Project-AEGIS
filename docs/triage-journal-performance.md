@@ -34,7 +34,9 @@ once by event_exists and again by recover even if its event is already present.
   outer finding transaction enumerates receipt names and reads every receipt and
   receipted event. Only EXACTLY unchanged bytes reuse parsed/validated objects.
   New/changed bytes are parsed and validated. Global duplicate sequence and chain
-  continuity validation remain on each snapshot. No timestamps are trusted.
+  continuity validation run on every new/changed snapshot. Their proof is reused
+  only after the entire filename set and every source byte match exactly.
+  No timestamps are trusted.
   History paths/instances are resolved once per distinct directory per recovery,
   not once per receipt. begin/save reuse the already validated snapshot under the
   unchanged finding lock and maintain its latest-by-finding/sequence lookup.
@@ -60,3 +62,66 @@ as historical tampering: the files have never been authenticated or signed.
 No compaction, persisted-index migration, watcher, new dependency or plugin/network
 feature is introduced. Existing durability and nontransactional pipeline limits
 from storage-integrity.md still apply.
+
+
+## Final measured results
+
+Final paired run: CPython 3.12.14, Linux x86_64, same benchmark script/fixture and
+environment before/after, warm OS filesystem cache. Seven samples per repeated
+query/transition and three fresh FindingStore samples. All times below are ms.
+The deterministic fixture has one finding, alternating valid transitions, all
+receipts done, and one persisted event per receipt. Production workloads with
+many findings, pending recovery or cold disks are not covered by these timings.
+
+| Receipts | Repeated query before → after | Speedup | Same-store transition before → after | Speedup |
+| --- | --- | --- | --- | --- |
+| 100 | 8.90 → 1.36 | 6.56× | 15.28 → 2.70 | 5.66× |
+| 1,000 | 84.90 → 12.85 | 6.61× | 135.11 → 14.23 | 9.49× |
+| 10,000 | 883.30 → 158.75 | 5.56× | 1,419.09 → 189.62 | 7.48× |
+
+| Receipts | First query in reopened store (median) before → after | Independent-store transition before → after |
+| --- | --- | --- |
+| 100 | 8.48 → 3.45 | 16.48 → 4.66 |
+| 1,000 | 84.47 → 32.08 | 135.54 → 33.61 |
+| 10,000 | 885.21 → 400.59 | 1,400.32 → 438.11 |
+
+At 10,000 receipts standalone warmed recovery (lock acquisition excluded) went
+from 894.45 to 157.97 ms. The full stage probes and cProfile data are retained in
+benchmarks/results/sprint4-linux-before.json and sprint4-linux-after.json.
+The micro-stage probes deliberately parse/validate every payload even in the
+optimized source: they isolate unavoidable cold work, not warmed cache behavior.
+Functional call-count tests verify unchanged receipts avoid repeated semantic
+parsing and transitions take only one validated receipt snapshot.
+
+Indicative goals were reached IN THIS measurement: repeated queries ≥5×,
+same-store and independent-store transitions ≥3× at 10,000, and no >20% operation
+regression at 100. This is not a performance guarantee for Windows, other
+Python versions, physical disks or different receipt/finding distributions.
+Index/checkpoint decisions should be revisited if cold-start or byte-I/O costs
+become dominant. Cache memory is linear; original receipts continue to grow.
+
+## Reproduce
+
+From the repository root with project dev dependencies installed:
+
+    mkdir -p /tmp/aegis-s4-baseline
+    git archive 03f17c7bd4e2ac7481845b1e04fb2a25b229dcdc | tar -x -C /tmp/aegis-s4-baseline
+    python benchmarks/triage_journal.py --source /tmp/aegis-s4-baseline/aegis --repeats 7 --output /tmp/before.json
+    python benchmarks/triage_journal.py --source ./aegis --repeats 7 --output /tmp/after.json
+
+The Python benchmark is Windows/Linux compatible. On Windows extract the same
+baseline commit into a separate folder and pass that folder's aegis directory as
+--source. Extraction syntax above uses POSIX tools. Results are informational,
+outside pytest; CI never fails because a machine misses a latency target.
+
+## Regression coverage
+
+27 added functional test cases cover byte reuse, one transaction snapshot,
+same-size changes with restored timestamps, invalid UTF-8/JSON/schema,
+contradictions and duplicate sequences, missing event reconstruction, absent
+cache, failed derived snapshot construction, valid legacy volumes, independent
+process updates, shared-store threads, recovery interruptions and repeated
+recovery, technical-field independence, symlink retargeting and fork cache reset.
+The last two cases require POSIX and are skipped on Windows.
+All 551 existing test cases are retained. Local Python 3.12/3.13: 578 passed each.
+Final CI outcomes are recorded in the PR/report after publication.

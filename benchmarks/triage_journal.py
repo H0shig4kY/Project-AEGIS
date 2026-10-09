@@ -28,8 +28,10 @@ def main():
     parser.add_argument("--repeats", type=int, default=7)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
+    if args.repeats < 1:
+        parser.error("repeats must be positive")
     sys.path.insert(0, str(args.source.resolve()))
-    from aegis.atomic_storage import atomic_write_text
+    from aegis.atomic_storage import atomic_write_text, directory_lock
     from aegis.finding_store import FindingStore
     from aegis.finding_triage import FindingTriageManager
     from aegis.finding_triage_history_store import FindingTriageHistoryStore
@@ -38,8 +40,8 @@ def main():
 
     rows = []
     for count in args.counts:
-        if count % 2:
-            parser.error("counts must be even (fixture ends OPEN)")
+        if count < 0 or count % 2:
+            parser.error("counts must be nonnegative and even (fixture ends OPEN)")
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             store = FindingStore(root / "findings")
@@ -86,6 +88,10 @@ def main():
             repeats = [timed(lambda: store.get(record.finding_id))[1] for _ in range(args.repeats)]
             restarts = [timed(lambda: FindingStore(store.path).get(record.finding_id))[1]
                         for _ in range(3)]
+            # Standalone recovery probe excludes finding-lock acquisition cost.
+            with directory_lock(store.path):
+                _, recovery_ms = timed(lambda: triage_journal.recover(store))
+                store._triage_view = None
             # Profile end-to-end recovery separately (profile timings have overhead).
             profile = cProfile.Profile()
             profile.runcall(store.get, record.finding_id)
@@ -113,7 +119,7 @@ def main():
             _, write_ms = timed(lambda: atomic_write_text(journal / ".benchmark.tmp", "{}"))
             rows.append(dict(receipts=count, stages_ms=dict(read=read_ms, parse=parse_ms,
                 event_validation=validate_ms, sort=sort_ms, global_chain=chain_ms,
-                atomic_write=write_ms), first_query_ms=first_ms,
+                atomic_write=write_ms, recovery=recovery_ms), first_query_ms=first_ms,
                 reopened_query_median_ms=statistics.median(restarts),
                 repeated_query_median_ms=statistics.median(repeats),
                 transition_median_ms=statistics.median(transitions),

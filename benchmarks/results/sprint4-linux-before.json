@@ -1,0 +1,246 @@
+{
+  "python": "3.12.14 (main, Aug 25 2026, 14:00:49) [Clang 22.1.3 ]",
+  "platform": "Linux-6.18.44-x86_64-with-glibc2.39",
+  "source": "/tmp/aegis-s4-baseline/aegis",
+  "repeats": 7,
+  "clock": "perf_counter",
+  "rows": [
+    {
+      "receipts": 100,
+      "stages_ms": {
+        "read": 0.5472869999039176,
+        "parse": 0.3447110000251996,
+        "event_validation": 0.5424590000302487,
+        "sort": 0.012789000038537779,
+        "global_chain": 0.02756200001385878,
+        "atomic_write": 0.3685560000121768,
+        "recovery": 8.285314999966431
+      },
+      "first_query_ms": 8.916689999978189,
+      "reopened_query_median_ms": 8.478547000095205,
+      "repeated_query_median_ms": 8.900003000007928,
+      "transition_median_ms": 15.283006000004207,
+      "independent_transition_median_ms": 16.480694999927437,
+      "profile_top_self": [
+        {
+          "function": "<frozen posixpath>:join",
+          "calls": 1108,
+          "self_ms": 1.083
+        },
+        {
+          "function": "pathlib.py:_parse_path",
+          "calls": 707,
+          "self_ms": 1.065
+        },
+        {
+          "function": "<frozen posixpath>:_joinrealpath",
+          "calls": 201,
+          "self_ms": 0.969
+        },
+        {
+          "function": "pathlib.py:__str__",
+          "calls": 1213,
+          "self_ms": 0.906
+        },
+        {
+          "function": "<built-in method _io.open>",
+          "calls": 202,
+          "self_ms": 0.878
+        },
+        {
+          "function": "<built-in method posix.lstat>",
+          "calls": 803,
+          "self_ms": 0.772
+        },
+        {
+          "function": "pathlib.py:__init__",
+          "calls": 906,
+          "self_ms": 0.719
+        },
+        {
+          "function": "<built-in method posix.stat>",
+          "calls": 506,
+          "self_ms": 0.665
+        },
+        {
+          "function": "pathlib.py:_load_parts",
+          "calls": 706,
+          "self_ms": 0.529
+        },
+        {
+          "function": "<built-in method builtins.isinstance>",
+          "calls": 5536,
+          "self_ms": 0.517
+        },
+        {
+          "function": "triage_journal.py:_entries",
+          "calls": 1,
+          "self_ms": 0.504
+        },
+        {
+          "function": "pathlib.py:drive",
+          "calls": 806,
+          "self_ms": 0.496
+        }
+      ]
+    },
+    {
+      "receipts": 1000,
+      "stages_ms": {
+        "read": 6.117640000070423,
+        "parse": 3.3038710000710125,
+        "event_validation": 5.197309999971367,
+        "sort": 0.1739030000180719,
+        "global_chain": 0.4613969999809342,
+        "atomic_write": 0.26215599996248784,
+        "recovery": 83.69072599998617
+      },
+      "first_query_ms": 86.2772140000061,
+      "reopened_query_median_ms": 84.46883099998104,
+      "repeated_query_median_ms": 84.89864099999522,
+      "transition_median_ms": 135.10861299994303,
+      "independent_transition_median_ms": 135.5430900000556,
+      "profile_top_self": [
+        {
+          "function": "<frozen posixpath>:join",
+          "calls": 11008,
+          "self_ms": 10.61
+        },
+        {
+          "function": "pathlib.py:_parse_path",
+          "calls": 7007,
+          "self_ms": 10.521
+        },
+        {
+          "function": "<built-in method _io.open>",
+          "calls": 2002,
+          "self_ms": 10.242
+        },
+        {
+          "function": "<frozen posixpath>:_joinrealpath",
+          "calls": 2001,
+          "self_ms": 9.531
+        },
+        {
+          "function": "pathlib.py:__str__",
+          "calls": 12013,
+          "self_ms": 8.816
+        },
+        {
+          "function": "<built-in method posix.lstat>",
+          "calls": 8003,
+          "self_ms": 8.241
+        },
+        {
+          "function": "<built-in method posix.stat>",
+          "calls": 5006,
+          "self_ms": 7.248
+        },
+        {
+          "function": "pathlib.py:__init__",
+          "calls": 9006,
+          "self_ms": 7.056
+        },
+        {
+          "function": "pathlib.py:_load_parts",
+          "calls": 7006,
+          "self_ms": 5.588
+        },
+        {
+          "function": "triage_journal.py:_entries",
+          "calls": 1,
+          "self_ms": 5.445
+        },
+        {
+          "function": "<built-in method builtins.isinstance>",
+          "calls": 55036,
+          "self_ms": 5.192
+        },
+        {
+          "function": "<built-in method sys.intern>",
+          "calls": 26023,
+          "self_ms": 5.15
+        }
+      ]
+    },
+    {
+      "receipts": 10000,
+      "stages_ms": {
+        "read": 68.08848900004705,
+        "parse": 33.64466000004995,
+        "event_validation": 52.38161299996591,
+        "sort": 2.4866160000556192,
+        "global_chain": 8.511897000062163,
+        "atomic_write": 0.2327710000145089,
+        "recovery": 894.4497510000247
+      },
+      "first_query_ms": 898.6600220000582,
+      "reopened_query_median_ms": 885.2146010000297,
+      "repeated_query_median_ms": 883.3017630000768,
+      "transition_median_ms": 1419.0870269999323,
+      "independent_transition_median_ms": 1400.3211460000102,
+      "profile_top_self": [
+        {
+          "function": "<frozen posixpath>:join",
+          "calls": 110008,
+          "self_ms": 106.256
+        },
+        {
+          "function": "pathlib.py:_parse_path",
+          "calls": 70007,
+          "self_ms": 105.7
+        },
+        {
+          "function": "<built-in method _io.open>",
+          "calls": 20002,
+          "self_ms": 99.607
+        },
+        {
+          "function": "<frozen posixpath>:_joinrealpath",
+          "calls": 20001,
+          "self_ms": 97.155
+        },
+        {
+          "function": "pathlib.py:__str__",
+          "calls": 120013,
+          "self_ms": 88.05
+        },
+        {
+          "function": "<built-in method posix.lstat>",
+          "calls": 80003,
+          "self_ms": 79.26
+        },
+        {
+          "function": "<built-in method posix.stat>",
+          "calls": 50006,
+          "self_ms": 71.416
+        },
+        {
+          "function": "pathlib.py:__init__",
+          "calls": 90006,
+          "self_ms": 70.437
+        },
+        {
+          "function": "triage_journal.py:_entries",
+          "calls": 1,
+          "self_ms": 56.044
+        },
+        {
+          "function": "pathlib.py:_load_parts",
+          "calls": 70006,
+          "self_ms": 53.765
+        },
+        {
+          "function": "<built-in method builtins.isinstance>",
+          "calls": 550036,
+          "self_ms": 52.272
+        },
+        {
+          "function": "pathlib.py:__init__",
+          "calls": 90006,
+          "self_ms": 45.114
+        }
+      ]
+    }
+  ]
+}
