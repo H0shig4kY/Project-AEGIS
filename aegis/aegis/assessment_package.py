@@ -86,6 +86,27 @@ def safe_package_source(path):
     return path
 
 
+def zip64_values(extra, values):
+    """Only a single, necessary ZIP64 field; sizes then local-header offset."""
+    required = [index for index, value in enumerate(values) if value == 0xffffffff]
+    if not required:
+        if extra:
+            failure()
+        return values
+    if len(extra) != 4 + 8 * len(required):
+        failure()
+    field, length = struct.unpack('<HH', extra[:4])
+    if field != 1 or length != 8 * len(required):
+        failure()
+    result = list(values)
+    for position, index in enumerate(required):
+        value = struct.unpack_from('<Q', extra, 4 + position * 8)[0]
+        if value <= zipfile.ZIP64_LIMIT:
+            failure()
+        result[index] = value
+    return tuple(result)
+
+
 def preflight(stream, limits):
     """Bound central-directory entry count before ZipFile allocates its inventory."""
     size = os.fstat(stream.fileno()).st_size
@@ -113,7 +134,7 @@ def preflight(stream, limits):
             failure()
         stream.seek(locator[2])
         record = struct.unpack('<4sQHHLLQQQQ', stream.read(56))
-        if record[0] != b'PK\x06\x06' or record[1] != 44 or record[4] or record[5] or record[6] != record[7]:
+        if record[0] != b'PK\x06\x06' or record[1] != 44 or record[2:4] != (45,45) or record[4] or record[5] or record[6] != record[7]:
             failure()
         for declared, actual, marker in ((eocd[3],record[6],65535),
                 (count,record[7],65535),(directory_size,record[8],0xffffffff),
@@ -121,6 +142,8 @@ def preflight(stream, limits):
             if declared != marker and declared != actual:
                 failure()
         count, directory_size, offset = record[7], record[8], record[9]
+        if count <= 65535 and max(directory_size, offset) <= zipfile.ZIP64_LIMIT:
+            failure()  # ZIP64 archive metadata must be necessary.
         central_end = locator[2]
     elif directory_size == 0xffffffff or offset == 0xffffffff or eocd[3] != count:
         # Exactly 65,535 entries can be a legitimate non-ZIP64 archive.
@@ -132,7 +155,7 @@ def preflight(stream, limits):
     # Walk fixed-size central headers first, with O(1) additional memory and a
     # bounded number of reads. No inventory objects exist at this stage.
     stream.seek(offset)
-    actual = 0
+    actual, local_end, total = 0, 0, 0
     while stream.tell() < central_end:
         if central_end - stream.tell() < 46:
             failure()
@@ -143,8 +166,34 @@ def preflight(stream, limits):
                 header[10] > 128 or variable > 466 or header[13] or
                 stream.tell() + variable > central_end):
             failure()
-        stream.seek(variable, 1)
-    if actual != count:
+        if header[12] or header[3] & ~0x800 or header[4] != zipfile.ZIP_STORED:
+            failure()  # No comments, encryption or data descriptors.
+        name = stream.read(header[10])
+        extra = stream.read(header[11])
+        uncompressed, compressed, local_offset = zip64_values(
+            extra, (header[9], header[8], header[16]))
+        if compressed != uncompressed or local_offset != local_end:
+            failure()
+        central_position = stream.tell()
+        if local_offset + 30 > offset:
+            failure()
+        stream.seek(local_offset)
+        local = struct.unpack('<4s5H3L2H', stream.read(30))
+        if (local[0] != b'PK\x03\x04' or local[9] != len(name) or local[10] > 28 or
+                local_offset + 30 + local[9] + local[10] > offset):
+            failure()
+        local_name = stream.read(local[9])
+        local_extra = stream.read(local[10])
+        local_uncompressed, local_compressed = zip64_values(local_extra, (local[8], local[7]))
+        if (local_name != name or local[1:7] != (header[2],header[3],header[4],header[5],header[6],header[7]) or
+                (local_compressed, local_uncompressed) != (compressed, uncompressed)):
+            failure()
+        local_end = stream.tell() + compressed
+        total += uncompressed
+        if local_end > offset or total > limits.max_total_content_bytes:
+            failure()
+        stream.seek(central_position)
+    if actual != count or local_end != offset:
         failure()
     stream.seek(0)
 

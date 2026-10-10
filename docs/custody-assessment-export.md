@@ -182,3 +182,34 @@ Source and package readers share the object-only baseline validator and the pure
 legacy technical-history decoder. Optional history fields and naive legacy
 timestamps retain the source store's existing behavior. Invalid CLI profiles are
 reported with allowed options without echoing the supplied value.
+
+## Supported physical ZIP layouts
+
+The portable AEGIS format accepts a single-disk, unencrypted `ZIP_STORED` archive
+with local members in the same order as the central directory. The first local
+header starts at byte zero. Every local header, filename, extra field and payload
+must end exactly where the next member starts, and the last payload must end at
+the central directory. Headers must agree on filename, required version, flags,
+timestamps, CRC and sizes. Gaps, overlapping regions, orphan payloads, prefixes,
+trailing data and inconsistent offsets are rejected before `ZipFile` allocation.
+Payload CRCs and manifest hashes are subsequently verified through bounded reads.
+
+Data descriptors, including otherwise valid streaming ZIP layouts, are not
+supported. Descriptor flags are rejected explicitly; there is no permissive
+fallback. Canonical AEGIS exports use seekable output and do not need descriptors.
+
+Archive and member comments are forbidden in both share and forensic. Local and
+central extra fields must be empty unless a single `0x0001` ZIP64 field is needed
+for a sentinel size or offset. Its length, field order and decoded values must
+match the headers; redundant, duplicate, unknown and malformed fields are errors.
+ZIP64 follows the canonical Python writer threshold (`ZIP64_LIMIT`, 2 GiB minus
+one byte) for sizes/offsets. Minimal ZIP64 EOCD/locator records with version 45 are
+accepted only when the member count exceeds 65,535 or a central offset/size exceeds
+that threshold. Local policy limits still apply and cannot be raised by a package.
+
+Physical-layout validation and actual entry counting retain constant additional
+memory and bounded header reads before inventory materialization. Declared payload
+sizes are summed during this pass, including the manifest. Bytes outside the
+inventoried layout are rejected rather than excluded from content accounting.
+These restrictions define the AEGIS subset; general-purpose ZIP variants outside
+it are unsupported, even if another ZIP reader accepts them.
