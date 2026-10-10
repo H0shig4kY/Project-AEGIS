@@ -29,7 +29,9 @@ with stderr and no publication, rather than escaping as an unhandled exception.
 Available finding fields are rule_id, severity, title, description, asset type
 and value, affected_service, plugin, coverage_plugins, technical state, triage
 state, lifecycle timestamps, counters and active. Severity is copied, never
-reclassified. There is no modeled CVSS, recommendation or finding-evidence link.
+reclassified. There is no modeled CVSS or recommendation. Schema 1 has no embedded
+modeled finding-evidence link; Sprint 6 manages explicit associations in a separate
+namespace, exposed only through the opt-in schema 2 projection.
 Unknown existing JSON fields are retained as opaque source_extensions, including
 an evidence field if one is actually stored; they are not verified evidence and
 no files or scan results are inferred to belong to a finding.
