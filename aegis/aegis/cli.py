@@ -10,6 +10,7 @@ import typer
 
 from aegis.assessment import AssessmentContext
 from aegis.evidence_cli import register_evidence_commands
+from aegis.custody_cli import register_custody_commands
 from aegis.finding_triage import FindingTriageManager
 from aegis.findings_report import (ReportFormat, build_report, render_json, render_markdown, write_report)
 from aegis.change_engine import ChangeEngine
@@ -3747,6 +3748,7 @@ def findings_report(
 
 
 register_evidence_commands(findings_app)
+register_custody_commands(app, findings_app)
 
 
 if __name__ == "__main__":

@@ -49,3 +49,15 @@ aegis findings report --schema-version 2 --format json
 
 Report schema 1 remains the default. Evidence schema 2 exports verified metadata,
 never captured blobs. See [limits, provenance, security and failure behaviour](docs/evidence-management.md).
+
+### Evidence custody and portable assessment export
+
+Explicitly activate an independent custody chain with
+`aegis assessment custody init --actor operator --reason 'Activate custody'`.
+Export minimized metadata using `aegis assessment export --output /external/share.zip`.
+Complete plaintext records require `--profile forensic`; captured objects also
+require `--include-objects`. Verify packages independently with
+`aegis assessment package verify /external/share.zip --json`, without extraction
+or network access. Hash integrity does not authenticate operators or package origin.
+See [custody and assessment export](docs/custody-assessment-export.md) for profiles,
+limits, explicit recovery, compatibility and security limitations.

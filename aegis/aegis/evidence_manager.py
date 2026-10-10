@@ -64,6 +64,10 @@ class EvidenceManager:
                 self.store.initialize()
                 with directory_lock(self.store.root):
                     self.store._layout()
+                    from aegis.custody import CustodyManager
+                    custody = CustodyManager(self.campaign)
+                    if custody.exists():
+                        custody.verify()
                     records = self.store._records()
                     for existing in records:
                         self.store._verify(existing)
@@ -80,7 +84,10 @@ class EvidenceManager:
                         if used + additional > limits.max_assessment_bytes:
                             raise ValueError('Assessment evidence storage limit exceeded')
                         self.store.publish_object(digest, content)
-                    self.store.publish_record(record)
+                    if custody.exists():
+                        custody.commit_record(record)
+                    else:
+                        self.store.publish_record(record)
                     return record
 
     def attach_file(self, finding_id, path, *, actor, reason, observed_at=None):
