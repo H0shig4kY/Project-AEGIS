@@ -9,6 +9,7 @@ import re
 import typer
 
 from aegis.assessment import AssessmentContext
+from aegis.evidence_cli import register_evidence_commands
 from aegis.finding_triage import FindingTriageManager
 from aegis.findings_report import (ReportFormat, build_report, render_json, render_markdown, write_report)
 from aegis.change_engine import ChangeEngine
@@ -3728,13 +3729,14 @@ def findings_triage_history(
 def findings_report(
     format: ReportFormat = typer.Option(ReportFormat.JSON, "--format", help="Report format: json or markdown."),
     output: Path | None = typer.Option(None, "--output", help="New output file; existing destinations are rejected."),
+    schema_version: int = typer.Option(1, "--schema-version", min=1, max=2, help="Schema 2 includes verified evidence metadata."),
 ):
     """Export a validated findings snapshot without scans, recovery or state changes."""
     try:
         campaign = find_campaign()
         if campaign is None:
             raise LookupError("no AEGIS / ARGUS campaign found.")
-        report = build_report(campaign)
+        report = build_report(campaign, schema_version=schema_version)
         content = render_json(report) if format == ReportFormat.JSON else render_markdown(report)
         if output is not None:
             write_report(output, content, campaign=campaign)
@@ -3742,6 +3744,9 @@ def findings_report(
             typer.echo(content, nl=False)
     except (ValueError, LookupError, OSError, TypeError) as error:
         _triage_error(str(error))
+
+
+register_evidence_commands(findings_app)
 
 
 if __name__ == "__main__":

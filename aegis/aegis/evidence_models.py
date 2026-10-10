@@ -72,7 +72,7 @@ Origin = Annotated[LocalOrigin | ObservationOrigin | ExternalOrigin, Field(discr
 
 
 class EvidenceRecord(ImmutableModel):
-    schema_version: Literal[1] = 1
+    schema_version: int = Field(default=1, strict=True, ge=1, le=1)
     evidence_id: Identifier
     finding_id: Digest
     kind: Literal['local_file', 'stored_observation', 'external_reference']
@@ -101,12 +101,17 @@ class EvidenceRecord(ImmutableModel):
             return value
         if value.tzinfo is None or value.utcoffset() is None:
             raise ValueError('Evidence timestamps must be timezone-aware')
-        return value.astimezone(timezone.utc)
+        try:
+            return value.astimezone(timezone.utc)
+        except OverflowError as error:
+            raise ValueError('Evidence timestamp cannot be represented in UTC') from error
 
     @model_validator(mode='after')
     def coherent(self):
         if self.kind != self.origin.kind:
             raise ValueError('Evidence kind and origin must agree')
+        if self.kind != 'stored_observation' and self.source_integrity != 'unknown':
+            raise ValueError('Only stored observations have result integrity baselines')
         expected = {'local_file': 'raw-v1', 'stored_observation': 'observation-json-v1',
                     'external_reference': 'reference-v1'}[self.kind]
         if self.representation != expected:

@@ -11,7 +11,7 @@ import yaml
 from aegis.atomic_storage import StorageIntegrityError, directory_lock
 from aegis.evidence_models import (EvidenceLimits, EvidenceRecord, ExternalOrigin, LocalOrigin,
                                    ObservationOrigin, source_name)
-from aegis.evidence_store import EvidenceStore, association_key, canonical, read_regular
+from aegis.evidence_store import EvidenceStore, _linklike, association_key, canonical, read_regular
 from aegis.finding_snapshot import require_finding
 from aegis.models import ResultIntegrityManifest
 from aegis.provenance import build_observation_id, build_result_id
@@ -56,6 +56,8 @@ class EvidenceManager:
                 content_sha256=digest, content_size=len(content) if content is not None else None,
                 representation=representation, source_integrity=source_integrity,
                 deduplication_key=association_key(finding_id, origin.kind, origin, digest))
+            if len(canonical(record.model_dump(mode='json'))) > 65536:
+                raise ValueError('Evidence metadata size limit exceeded')
             self.store.initialize()
             with directory_lock(self.store.root):
                 self.store._layout()
@@ -81,8 +83,13 @@ class EvidenceManager:
     def attach_file(self, finding_id, path, *, actor, reason, observed_at=None):
         path = Path(path)
         origin = LocalOrigin(kind='local_file', source_name=path.name)
+        def capture(limits):
+            for parent in path.absolute().parents:
+                if _linklike(parent.lstat()):
+                    raise ValueError('Local source path must not contain symlinks or reparse points')
+            return read_regular(path, limits.max_object_bytes)[0]
         return self._attach(finding_id, origin,
-            lambda limits: read_regular(path, limits.max_object_bytes)[0], actor, reason,
+            capture, actor, reason,
             observed_at, 'raw-v1')
 
     def attach_reference(self, finding_id, locator, *, actor, reason, observed_at=None):
