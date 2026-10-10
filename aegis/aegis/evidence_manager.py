@@ -45,40 +45,41 @@ class EvidenceManager:
         actor = self._text(actor, 'actor'); reason = self._text(reason, 'reason')
         with directory_lock(self.campaign.findings_dir, create=False):
             require_finding(self.campaign, finding_id)
-            limits = self._limits()
-            content = capture(limits) if capture else None
-            if content is not None and len(content) > limits.max_object_bytes:
-                raise ValueError('Evidence object size limit exceeded')
-            digest = hashlib.sha256(content).hexdigest() if content is not None else None
-            record = EvidenceRecord(evidence_id=uuid4().hex, finding_id=finding_id,
-                kind=origin.kind, origin=origin, registered_at=datetime.now(timezone.utc),
-                observed_at=observed_at, actor=actor, reason=reason,
-                content_sha256=digest, content_size=len(content) if content is not None else None,
-                representation=representation, source_integrity=source_integrity,
-                deduplication_key=association_key(finding_id, origin.kind, origin, digest))
-            if len(canonical(record.model_dump(mode='json'))) > 65536:
-                raise ValueError('Evidence metadata size limit exceeded')
-            self.store.initialize()
-            with directory_lock(self.store.root):
-                self.store._layout()
-                records = self.store._records()
-                for existing in records:
-                    self.store._verify(existing)
-                    if existing.deduplication_key == record.deduplication_key:
-                        if (existing.actor, existing.reason, existing.observed_at) != (actor, reason, record.observed_at):
-                            raise ValueError('Evidence association metadata conflict')
-                        return existing
-                used = self.store.physical_bytes()
-                if used > limits.max_assessment_bytes:
-                    raise ValueError('Assessment evidence storage limit exceeded')
-                if content is not None:
-                    path = self.store.objects / (digest + '.blob')
-                    additional = 0 if path.exists() else len(content)
-                    if used + additional > limits.max_assessment_bytes:
+            with directory_lock(self.campaign.path):
+                limits = self._limits()
+                content = capture(limits) if capture else None
+                if content is not None and len(content) > limits.max_object_bytes:
+                    raise ValueError('Evidence object size limit exceeded')
+                digest = hashlib.sha256(content).hexdigest() if content is not None else None
+                record = EvidenceRecord(evidence_id=uuid4().hex, finding_id=finding_id,
+                    kind=origin.kind, origin=origin, registered_at=datetime.now(timezone.utc),
+                    observed_at=observed_at, actor=actor, reason=reason,
+                    content_sha256=digest, content_size=len(content) if content is not None else None,
+                    representation=representation, source_integrity=source_integrity,
+                    deduplication_key=association_key(finding_id, origin.kind, origin, digest))
+                if len(canonical(record.model_dump(mode='json'))) > 65536:
+                    raise ValueError('Evidence metadata size limit exceeded')
+                self.store.initialize()
+                with directory_lock(self.store.root):
+                    self.store._layout()
+                    records = self.store._records()
+                    for existing in records:
+                        self.store._verify(existing)
+                        if existing.deduplication_key == record.deduplication_key:
+                            if (existing.actor, existing.reason, existing.observed_at) != (actor, reason, record.observed_at):
+                                raise ValueError('Evidence association metadata conflict')
+                            return existing
+                    used = self.store.physical_bytes()
+                    if used > limits.max_assessment_bytes:
                         raise ValueError('Assessment evidence storage limit exceeded')
-                    self.store.publish_object(digest, content)
-                self.store.publish_record(record)
-                return record
+                    if content is not None:
+                        path = self.store.objects / (digest + '.blob')
+                        additional = 0 if path.exists() else len(content)
+                        if used + additional > limits.max_assessment_bytes:
+                            raise ValueError('Assessment evidence storage limit exceeded')
+                        self.store.publish_object(digest, content)
+                    self.store.publish_record(record)
+                    return record
 
     def attach_file(self, finding_id, path, *, actor, reason, observed_at=None):
         path = Path(path)

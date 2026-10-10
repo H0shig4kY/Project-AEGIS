@@ -1,5 +1,9 @@
 # Finding reports: read model and integrity decision
 
+Schema 1 remains the default. Sprint 6 adds explicit `--schema-version 2` for
+verified evidence metadata, without exporting captured content. See
+[evidence management](evidence-management.md#opt-in-reporting-schema-2).
+
 Reports project existing assessment JSON into schema version 1. They never call
 AssessmentContext or FindingStore.find/get/transaction: constructing the full
 assessment creates unrelated stores, and normal finding reads recover the triage
