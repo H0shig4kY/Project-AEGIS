@@ -130,8 +130,12 @@ locking after the established finding/history/assessment locks.
 
 Content is completely written, flushed and fsynced in staging, then published with
 an exclusive hard link. Its bytes are verified before the JSON record is published
-the same way. The JSON record is the authoritative association and audit commit
-marker; there is no separate multi-file audit write and no evidence WAL.
+the same way. Without activated custody, the JSON record is the authoritative
+association and audit commit marker; there is no separate evidence WAL. After
+Sprint 7 custody activation, a record alone is not a completed operation: the
+intent, chained event and completion receipt are also required. Dedicated readers
+reject pending operations rather than recovering them. See
+[custody publication](custody-assessment-export.md#storage-and-publication).
 Successful publication removes only its own temporary link. A failed write,
 publication or synchronization preserves remaining temporaries and orphan objects.
 
@@ -217,5 +221,6 @@ oversized records, silent short writes and linked source parents. Fault injectio
 uses temporary assessments only. Coverage includes real subprocess CLI, threads
 and spawned processes, quotas, read-only source bytes/mtime, retained orphans,
 post-publication failures, legacy schema 1 and verified schema 2.
-Final suite/CI results are reported in the PR. An independent audit is required
-before recommending integration; no merge is authorized by this sprint.
+These are historical Sprint 6 validation notes; the final results and independent
+review belong to [PR #7](https://github.com/H0shig4kY/Project-AEGIS/pull/7).
+Sprint 6 is integrated at the post-Sprint-7 documentation baseline.
