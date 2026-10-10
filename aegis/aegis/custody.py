@@ -14,10 +14,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from aegis.atomic_storage import StorageIntegrityError, directory_lock, sync_directory
+from aegis.atomic_storage import StorageIntegrityError, directory_lock, sync_directory, _local
 from aegis.evidence_models import EvidenceRecord
 from aegis.evidence_store import (EvidenceReader, EvidenceStore, canonical, read_regular,
-                                  validate_storage_path, _unique_members, _invalid_constant, _finite_float)
+                                  validate_storage_path, association_key, _unique_members, _invalid_constant, _finite_float)
 
 MIB = 1024 ** 2
 MAX_METADATA = 256 * MIB
@@ -161,6 +161,8 @@ class CustodyReader:
         except FileNotFoundError:
             return False
         validate_storage_path(self.root, self.campaign.path)
+        if os.name == 'posix' and self.root.stat().st_mode & 0o077:
+            fail()
         return True
 
     @contextmanager
@@ -180,13 +182,32 @@ class CustodyReader:
     def _state(self, *, pending=False):
         if not self.exists():
             return None
+        directories = {'events', 'intents', 'completions', 'staging'}
+        for path in scan(self.root):
+            if path.name in directories:
+                validate_storage_path(path, self.campaign.path)
+                if os.name == 'posix' and path.stat().st_mode & 0o077:
+                    fail()
+            else:
+                temporary = path.name.startswith('.publication-') and path.suffix == '.tmp'
+                lock_metadata = {'.aegis-lock.sqlite' + suffix for suffix in ('', '-journal', '-wal', '-shm')}
+                if path.name not in {'genesis.json', 'baseline.json'} | lock_metadata and not temporary:
+                    fail()
+                validate_storage_path(path, self.campaign.path, regular=True)
+        for directory in directories:
+            for path in scan(self.root / directory):
+                validate_storage_path(path, self.campaign.path, regular=True)
         intents = []
+        processed = 0
         for path in scan(self.root / 'intents'):
             if path.name.startswith('.publication-') and path.suffix == '.tmp':
                 continue
             if not re.fullmatch('[0-9a-f]{32}\\.json', path.name):
                 fail()
             raw = read(path, 16 * MIB + 256 * 1024)
+            processed += len(raw)
+            if processed > MAX_METADATA:
+                fail()
             value = strict_json(raw)
             if not isinstance(value, dict) or set(value) != {'schema_version','operation_id','event','record','genesis','baseline'}:
                 fail()
@@ -223,6 +244,8 @@ class CustodyReader:
                 try:
                     record = EvidenceRecord.model_validate(intent['record'])
                 except ValueError:
+                    fail()
+                if record.deduplication_key != association_key(record.finding_id, record.kind, record.origin, record.content_sha256):
                     fail()
                 if (event['evidence_id'] != record.evidence_id or event['finding_id'] != record.finding_id or
                         event['content_sha256'] != record.content_sha256 or event['content_size'] != record.content_size or
@@ -362,23 +385,28 @@ class CustodyManager(CustodyReader):
         self._finish(intent, raw)
 
     def initialize(self, *, actor, reason):
+        with directory_lock(self.campaign.findings_dir, create=False):
+            return self._initialize(actor=actor, reason=reason)
+
+    def _initialize(self, *, actor, reason):
         actor, reason = self._text(actor), self._text(reason)
         # Validate using the established history-before-assessment lock order.
         from aegis.findings_report import build_report
-        if not self.exists():
-            build_report(self.campaign, schema_version=2)
+        report = build_report(self.campaign)
         with self.writing() as evidence:
-            if self.exists():
+            if self.exists() and not self._blank_initialization():
                 return self.verify()['checkpoint']
             # Validate legacy finding/history/journal relationships before activation.
             records = evidence._records()
             baseline = {}
             for record in records:
+                if record.finding_id not in {item['record']['finding_id'] for item in report['findings']}:
+                    fail()
                 evidence._verify(record)
                 baseline[record.evidence_id] = digest(read(evidence.records_dir / (record.evidence_id + '.json'), 65536))
-            self.root.mkdir(mode=0o700)
+            self.root.mkdir(mode=0o700, exist_ok=True)
             for name in ('events','intents','completions','staging'):
-                (self.root / name).mkdir(mode=0o700)
+                (self.root / name).mkdir(mode=0o700, exist_ok=True)
             with directory_lock(self.root):
                 chain, operation = uuid4().hex, uuid4().hex
                 genesis = dict(schema_version=1, chain_id=chain, baseline_sha256=digest(canonical(baseline)))
@@ -387,11 +415,38 @@ class CustodyManager(CustodyReader):
                                   record=None, genesis=genesis, baseline=baseline))
                 return self.verify()['checkpoint']
 
+    def _blank_initialization(self):
+        """Explicit init may retry before any intent was published; preserve temps."""
+        for path in scan(self.root):
+            if path.name in {'events', 'intents', 'completions', 'staging'}:
+                validate_storage_path(path, self.campaign.path)
+                for child in scan(path):
+                    validate_storage_path(child, self.campaign.path, regular=True)
+                    if child.suffix == '.json':
+                        return False
+                    if not (child.name.startswith('.publication-') and child.suffix == '.tmp'):
+                        fail()
+            else:
+                validate_storage_path(path, self.campaign.path, regular=True)
+                if path.name in {'genesis.json', 'baseline.json'}:
+                    return False
+                if not (path.name.startswith('.aegis-lock.sqlite') or
+                        (path.name.startswith('.publication-') and path.suffix == '.tmp')):
+                    fail()
+        return True
+
     def commit_record(self, record):
         # Caller holds finding/assessment/evidence locks; new associations only.
+        held = getattr(_local, 'locks', {}) if getattr(_local, 'pid', None) == os.getpid() else {}
+        required = (self.campaign.findings_dir, self.campaign.path,
+                    self.campaign.evidence_dir / 'managed-v1')
+        if any(os.path.normcase(str(path.resolve())) not in held for path in required):
+            raise StorageIntegrityError('Custody publication requires the evidence writer lock scope')
         with directory_lock(self.root, create=False):
             state = self._state()
             if state is None:
+                fail()
+            if record.evidence_id in state['inventory']:
                 fail()
             last = state['events'][-1]
             operation = uuid4().hex
@@ -405,9 +460,26 @@ class CustodyManager(CustodyReader):
         # No creation or implicit recovery on an absent chain.
         if not self.exists():
             raise LookupError('Custody is not initialized')
+        with directory_lock(self.campaign.findings_dir, create=False):
+            with self.locked():
+                preliminary = self._state(pending=True)
+            from aegis.finding_snapshot import require_finding
+            for intent in preliminary['incomplete']:
+                if intent['record'] is not None:
+                    require_finding(self.campaign, intent['record']['finding_id'])
+            return self._recover_locked()
+
+    def _recover_locked(self):
         with self.writing(), directory_lock(self.root):
             state = self._state(pending=True)
+            from aegis.evidence_manager import EvidenceManager
+            limits = EvidenceManager(self.campaign)._limits()
+            store = EvidenceStore(self.campaign)
+            if state['incomplete'] and store.physical_bytes() > limits.max_assessment_bytes:
+                raise StorageIntegrityError('Recovery exceeds current assessment content limit')
             for intent in state['incomplete']:
+                if intent['record'] is not None and intent['record']['content_size'] is not None and intent['record']['content_size'] > limits.max_object_bytes:
+                    raise StorageIntegrityError('Recovery exceeds current object limit')
                 raw = read(self.root / 'intents' / (intent['operation_id'] + '.json'), 16 * MIB + 256 * 1024)
                 self._finish(intent, raw)
             return self.verify()
