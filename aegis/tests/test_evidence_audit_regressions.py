@@ -138,3 +138,54 @@ def test_unrelated_runtime_error_is_not_masked(setup, monkeypatch):
     with pytest.raises(RuntimeError, match='unrelated programming defect'):
         with directory_lock(campaign.findings_dir):
             pass
+
+
+@pytest.mark.parametrize('damage', ['observation', 'schema', 'origin', 'deep-json', 'duplicate-key'])
+def test_inconsistent_snapshot_bytes_are_rejected_even_with_updated_hash(setup, damage):
+    campaign, finding, _ = setup
+    path = result(campaign)
+    record = EvidenceManager(campaign).attach_observation(finding.finding_id, path.name, 0,
+        actor='audit', reason='test')
+    root = campaign.evidence_dir / 'managed-v1'
+    raw = json.loads((root / 'objects' / (record.content_sha256 + '.blob')).read_bytes())
+    if damage == 'observation':
+        raw['observation']['target'] = 'changed'
+    elif damage == 'schema':
+        raw['schema_version'] = True
+    elif damage == 'origin':
+        raw['origin']['observation_id'] = 'f' * 64
+    content = b'[' * 20000 + b'0' + b']' * 20000 if damage == 'deep-json' else json.dumps(raw).encode()
+    if damage == 'duplicate-key':
+        content = content.replace(b'"schema_version": 1', b'"schema_version": 999, "schema_version": 1')
+    digest = hashlib.sha256(content).hexdigest()
+    (root / 'objects' / (digest + '.blob')).write_bytes(content)
+    payload = record.model_dump(mode='json'); payload['content_sha256'] = digest
+    payload['content_size'] = len(content)
+    payload['deduplication_key'] = association_key(record.finding_id, record.kind, record.origin, digest)
+    (root / 'records' / (record.evidence_id + '.json')).write_text(json.dumps(payload))
+    with pytest.raises(StorageIntegrityError):
+        EvidenceReader(campaign).verify(record.evidence_id)
+
+
+def test_api_reference_validation_does_not_disclose_input(setup):
+    campaign, finding, _ = setup
+    with pytest.raises(ValueError) as caught:
+        EvidenceManager(campaign).attach_reference(finding.finding_id,
+            'https://u:API_SECRET_MARKER@example.test', actor='audit', reason='test')
+    assert 'API_SECRET_MARKER' not in str(caught.value)
+
+
+@pytest.mark.parametrize('source', ['config', 'extra-key'])
+def test_report_parser_and_extra_key_errors_do_not_disclose_secrets(setup, monkeypatch, source):
+    campaign, finding, capture = setup
+    secret = 'PRIVATE_KEY_NAME_441'
+    record = EvidenceManager(campaign).attach_file(finding.finding_id, capture, actor='audit', reason='test')
+    if source == 'config':
+        campaign.config_file.write_text('name: [' + secret + '\n')
+    else:
+        path = campaign.evidence_dir / 'managed-v1' / 'records' / (record.evidence_id + '.json')
+        data = json.loads(path.read_text()); data[secret] = 'value'
+        path.write_text(json.dumps(data))
+    answer = invoke(campaign, ['findings', 'report', '--schema-version', '2'], monkeypatch)
+    assert answer.exit_code == 1 and answer.stderr and answer.stdout == ''
+    assert secret not in answer.output
