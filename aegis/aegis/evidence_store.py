@@ -92,10 +92,17 @@ class EvidenceReader:
         self.staging = self.root / 'staging'
 
     def _layout(self):
+        try:
+            self.root.lstat()
+            initialized = True
+        except FileNotFoundError:
+            initialized = False
         for path in (self.campaign.evidence_dir, self.root, self.objects, self.records_dir, self.staging):
             try:
                 info = path.lstat()
             except FileNotFoundError:
+                if initialized and path in (self.objects, self.records_dir, self.staging):
+                    raise StorageIntegrityError(f'Evidence storage is incomplete: {path.name}')
                 continue
             if _linklike(info) or not stat.S_ISDIR(info.st_mode):
                 raise StorageIntegrityError(f'Invalid evidence storage directory: {path.name}')
@@ -192,6 +199,8 @@ class EvidenceStore(EvidenceReader):
                 info = path.lstat()
                 if _linklike(info) or not stat.S_ISREG(info.st_mode):
                     raise StorageIntegrityError(f'Invalid content storage entry: {path.name}')
+                if info.st_ino == 0:
+                    raise StorageIntegrityError('Cannot establish physical object identity for quota accounting')
                 if directory == self.staging and path.name.startswith('metadata-'):
                     continue  # Quota concerns physical content, not JSON metadata.
                 if directory == self.objects:
@@ -217,7 +226,8 @@ class EvidenceStore(EvidenceReader):
             raise
         # Failed staging files are deliberately preserved for inspection.
         with stream:
-            stream.write(content)
+            if stream.write(content) != len(content):
+                raise OSError('Incomplete evidence staging write')
             stream.flush()
             os.fsync(stream.fileno())
         self._layout()
@@ -232,7 +242,6 @@ class EvidenceStore(EvidenceReader):
             destination.lstat()
         except FileNotFoundError:
             self._publish(destination, content)
-            return
         _, existing, size = read_regular(destination, len(content), content=False)
         if existing != digest or size != len(content):
             raise StorageIntegrityError('Existing evidence object conflicts with captured content')
