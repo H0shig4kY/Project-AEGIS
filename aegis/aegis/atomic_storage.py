@@ -1,6 +1,7 @@
 """Cooperative local-file locks and complete-file publication, without domain migration."""
 
 import json
+import errno
 import os
 import sqlite3
 import tempfile
@@ -26,7 +27,16 @@ def directory_lock(directory: Path, *, timeout: float = 10, create: bool = True)
     create=False preserves missing directories/lock databases and refuses
     pre-existing sidecars instead of allowing implicit metadata recovery.
     """
-    directory = Path(directory).resolve()
+    try:
+        directory = Path(directory).resolve()
+    except RuntimeError as error:
+        if not str(error).startswith('Symlink loop from '):
+            raise
+        raise StorageIntegrityError('Cannot resolve storage path: symlink cycle') from error
+    except OSError as error:
+        if error.errno != errno.ELOOP:
+            raise
+        raise StorageIntegrityError('Cannot resolve storage path: symlink cycle') from error
     if create:
         directory.mkdir(parents=True, exist_ok=True)
     key = os.path.normcase(str(directory))

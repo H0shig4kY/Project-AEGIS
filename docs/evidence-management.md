@@ -25,6 +25,11 @@ baseline quality and versioned association key. No source path controls storage
 names. Local origins store only a restricted plain basename, not an absolute path.
 Observation origins identify the result filename, raw result SHA-256, existing
 result/observation IDs, observation index, plugin/version and source timestamp.
+When verifying `observation-json-v1`, readers parse the conserved snapshot,
+compare every embedded origin field with the association, and recompute the
+selected observation ID. Invalid structure, nonfinite values, duplicate JSON members and mismatches
+stop verification and schema-2 export. This checks internal consistency, not
+authentication of the source or reconstruction of the full original result.
 The occurrence includes the result and index: repeated equal observations are not
 silently collapsed. Naive source timestamps are retained in the origin; they do
 not become an invented UTC observed timestamp.
@@ -62,6 +67,14 @@ Local names use the restricted ASCII plain-filename format used for safe source
 metadata. Result selectors are basenames inside `data/results`; arbitrary paths
 are rejected. A copied observation remains verifiable if the source result later
 disappears; its provenance records the source snapshot, not current availability.
+
+Observation capture checks lexical components from the already-resolved assessment
+root through `data`, `results`, `integrity` and the selected files before resolving
+locks or opening inputs. Symlinks, reparse points and inappropriate file types are
+rejected. Missing results fail; an absent integrity manifest remains legitimate
+unknown provenance. Components above the resolved assessment root are not rejected,
+preserving existing assessment-location behaviour. Checks are repeated before
+reading, but do not guarantee protection against hostile concurrent directory swaps.
 
 ## Limits and confidentiality
 
@@ -169,6 +182,10 @@ Read commands return metadata only. Verification is transient and never persists
 verified timestamp. JSON stdout contains no decorative messages. Normal errors
 use stderr and exit 1; CLI argument errors exit 2. File inputs and observations are
 explicitly chosen by the operator, not automatically attributed to findings.
+Validation diagnostics omit input values, validator context and parser excerpts.
+Only known schema field names and error categories are displayed; unknown mapping
+keys are redacted. Symlink-resolution cycles produce a controlled, path-free error
+in both Python 3.12 and 3.13. Unrelated RuntimeError exceptions are not masked.
 
 ## Opt-in reporting schema 2
 

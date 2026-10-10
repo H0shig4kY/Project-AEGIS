@@ -3,12 +3,14 @@
 from pathlib import Path
 
 import typer
+from pydantic import ValidationError
 
 from aegis.context import find_campaign
 from aegis.evidence_manager import EvidenceManager
 from aegis.evidence_store import EvidenceReader
 from aegis.finding_snapshot import require_finding
 from aegis.findings_report import render_json
+from aegis.validation_errors import validation_summary
 
 
 def _campaign():
@@ -33,7 +35,8 @@ def _run(action, json_output):
         else:
             typer.echo(render_json(value), nl=False)
     except (ValueError, LookupError, OSError, TypeError) as error:
-        typer.echo(f'Error: {error}', err=True)
+        message = validation_summary(error) if isinstance(error, ValidationError) else str(error)
+        typer.echo(f'Error: {message}', err=True)
         raise typer.Exit(code=1) from error
 
 

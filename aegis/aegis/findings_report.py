@@ -19,6 +19,7 @@ from aegis.context import CampaignContext
 from aegis.finding_history_store import FindingHistoryStore
 from aegis.finding_store import FindingStore
 from aegis.models import FindingState, FindingTriageState
+from aegis.validation_errors import validation_summary
 
 
 class ReportFormat(str, Enum):
@@ -71,7 +72,7 @@ def _history(directory, records, *, operational):
             _event_key(payload)  # Validate that the stored timestamp can be ordered.
             events[event.event_id] = payload
         except (KeyError, TypeError, ValueError, AttributeError, OverflowError, RecursionError) as error:
-            raise StorageIntegrityError(f"Invalid history in {path}: {error}") from error
+            raise StorageIntegrityError(f"Invalid history in {path}: {validation_summary(error)}") from error
     return events
 
 
@@ -129,7 +130,7 @@ def build_report(campaign: CampaignContext, *, generated_at: datetime | None = N
                 if "name" in config and config["name"] is not None and not isinstance(config["name"], str):
                     raise ValueError("assessment name must be a string or null")
             except (yaml.YAMLError, ValueError, UnicodeError, RecursionError) as error:
-                raise StorageIntegrityError(f"Invalid assessment configuration: {error}") from error
+                raise StorageIntegrityError(f"Invalid assessment configuration: {validation_summary(error)}") from error
             records = {}
             sources = {}
             for path in _json_paths(campaign.findings_dir):
@@ -141,7 +142,7 @@ def build_report(campaign: CampaignContext, *, generated_at: datetime | None = N
                     records[record.finding_id] = record
                     sources[record.finding_id] = source
                 except (KeyError, TypeError, ValueError, AttributeError, OverflowError, RecursionError) as error:
-                    raise StorageIntegrityError(f"Invalid finding in {path}: {error}") from error
+                    raise StorageIntegrityError(f"Invalid finding in {path}: {validation_summary(error)}") from error
             technical = _history(campaign.finding_history_dir, records, operational=False)
             histories = {directory: _history(directory, records, operational=True)
                          for directory in directories}

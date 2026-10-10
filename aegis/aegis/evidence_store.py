@@ -10,12 +10,28 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from aegis.atomic_storage import StorageIntegrityError, directory_lock, sync_directory
-from aegis.evidence_models import EvidenceRecord
+from aegis.evidence_models import EvidenceRecord, ObservationOrigin
+from aegis.provenance import build_observation_id
+from aegis.results import Observation
+from aegis.validation_errors import validation_summary
 
 
 def canonical(payload):
     return json.dumps(payload, sort_keys=True, separators=(',', ':'),
                       ensure_ascii=False, allow_nan=False).encode('utf-8')
+
+
+def _unique_members(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError('Duplicate observation snapshot member')
+        result[key] = value
+    return result
+
+
+def _invalid_constant(_value):
+    raise ValueError('Nonfinite observation snapshot value')
 
 
 def association_key(finding_id, kind, origin, content_sha256):
@@ -30,6 +46,26 @@ def _linklike(info):
 
 def _identity(info):
     return info.st_dev, info.st_ino
+
+
+def validate_storage_path(path, root, *, regular=False, optional=False):
+    """Check lexical assessment components before resolution; no hostile-race claim."""
+    path, root = Path(path), Path(root)
+    components = [root]
+    for part in path.relative_to(root).parts:
+        components.append(components[-1] / part)
+    for current in components:
+        try:
+            info = current.lstat()
+        except FileNotFoundError:
+            if optional:
+                return
+            raise ValueError('Observation source path does not exist') from None
+        if _linklike(info):
+            raise ValueError('Observation storage path contains a symlink or reparse point')
+        expected = stat.S_ISREG if regular and current == path else stat.S_ISDIR
+        if not expected(info.st_mode):
+            raise ValueError('Invalid observation storage path type')
 
 
 def read_regular(path, limit, *, content=True):
@@ -131,18 +167,29 @@ class EvidenceReader:
                 raise ValueError('Record identity or association key mismatch')
             return record
         except (OSError, ValueError, RecursionError, OverflowError) as error:
-            raise StorageIntegrityError(f'Invalid evidence record {path.name}: {error}') from error
+            raise StorageIntegrityError(f'Invalid evidence record: {validation_summary(error)}') from error
 
     def _verify(self, record):
         if record.content_sha256 is None:
             return {'evidence_id': record.evidence_id, 'status': 'reference_only'}
         try:
-            _, digest, size = read_regular(self.objects / (record.content_sha256 + '.blob'),
-                                           record.content_size, content=False)
+            snapshot_bytes, digest, size = read_regular(self.objects / (record.content_sha256 + '.blob'),
+                record.content_size, content=record.representation == 'observation-json-v1')
             if digest != record.content_sha256 or size != record.content_size:
                 raise ValueError('Evidence content digest or size mismatch')
-        except (OSError, ValueError) as error:
-            raise StorageIntegrityError(f'Invalid evidence object for {record.evidence_id}: {error}') from error
+            if record.representation == 'observation-json-v1':
+                snapshot = json.loads(snapshot_bytes, object_pairs_hook=_unique_members,
+                                      parse_constant=_invalid_constant)
+                if (not isinstance(snapshot, dict) or
+                        set(snapshot) != {'schema_version', 'origin', 'observation'} or
+                        type(snapshot['schema_version']) is not int or snapshot['schema_version'] != 1):
+                    raise ValueError('Invalid observation snapshot structure')
+                origin = ObservationOrigin.model_validate(snapshot['origin'])
+                observation = Observation.model_validate(snapshot['observation'])
+                if origin != record.origin or build_observation_id(origin.plugin, observation) != origin.observation_id:
+                    raise ValueError('Observation snapshot provenance contradicts association')
+        except (OSError, ValueError, TypeError, RecursionError, OverflowError) as error:
+            raise StorageIntegrityError(f'Invalid evidence object for {record.evidence_id}: {validation_summary(error)}') from error
         return {'evidence_id': record.evidence_id, 'status': 'verified',
                 'content_sha256': digest, 'content_size': size}
 

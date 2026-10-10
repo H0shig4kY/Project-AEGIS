@@ -11,7 +11,9 @@ import yaml
 from aegis.atomic_storage import StorageIntegrityError, directory_lock
 from aegis.evidence_models import (EvidenceLimits, EvidenceRecord, ExternalOrigin, LocalOrigin,
                                    ObservationOrigin, source_name)
-from aegis.evidence_store import EvidenceStore, _linklike, association_key, canonical, read_regular
+from aegis.evidence_store import (EvidenceStore, _linklike, association_key, canonical,
+                                  read_regular, validate_storage_path)
+from aegis.validation_errors import validation_summary
 from aegis.finding_snapshot import require_finding
 from aegis.models import ResultIntegrityManifest
 from aegis.provenance import build_observation_id, build_result_id
@@ -31,7 +33,7 @@ class EvidenceManager:
             data = yaml.safe_load(self.campaign.config_file.read_text(encoding='utf-8'))
             return EvidenceLimits.model_validate(data.get('evidence', {}))
         except (ValueError, TypeError, AttributeError, yaml.YAMLError, RecursionError) as error:
-            raise StorageIntegrityError(f'Invalid evidence configuration: {error}') from error
+            raise StorageIntegrityError(f'Invalid evidence configuration: {validation_summary(error)}') from error
 
     @staticmethod
     def _text(value, field):
@@ -104,11 +106,17 @@ class EvidenceManager:
         results = self.campaign.data_dir / 'results'
         integrity = self.campaign.data_dir / 'integrity'
         self.store._identifier(finding_id, 64)
+        validate_storage_path(results / result_filename, self.campaign.path, regular=True)
+        validate_storage_path(integrity / 'results-manifest.json', self.campaign.path,
+                              regular=True, optional=True)
         with directory_lock(self.campaign.findings_dir, create=False):
             require_finding(self.campaign, finding_id)
             # Existing results/manifest are read without constructing mutable stores.
             with directory_lock(integrity, create=False), directory_lock(results, create=False):
                 try:
+                    validate_storage_path(results / result_filename, self.campaign.path, regular=True)
+                    validate_storage_path(integrity / 'results-manifest.json', self.campaign.path,
+                                          regular=True, optional=True)
                     raw, digest, _ = read_regular(results / result_filename, self._limits().max_object_bytes)
                     payload = json.loads(raw)
                     result = PluginResult.model_validate(payload)
@@ -140,7 +148,7 @@ class EvidenceManager:
                         'observation': payload['observations'][observation_index]})
                     observed_at = result.timestamp if result.timestamp.tzinfo is not None else None
                 except (OSError, ValueError, KeyError, TypeError, RecursionError, OverflowError) as error:
-                    raise StorageIntegrityError(f'Cannot capture stored observation: {error}') from error
+                    raise StorageIntegrityError(f'Cannot capture stored observation: {validation_summary(error)}') from error
                 # Reentrant finding lock; source locks stay held until the commit marker.
                 return self._attach(finding_id, origin, lambda limits: content, actor, reason,
                                     observed_at, 'observation-json-v1', baseline)

@@ -12,7 +12,7 @@ Identifier = Annotated[str, Field(pattern=r'^[0-9a-f]{32}$', strict=True)]
 
 
 class ImmutableModel(BaseModel):
-    model_config = ConfigDict(frozen=True, extra='forbid')
+    model_config = ConfigDict(frozen=True, extra='forbid', hide_input_in_errors=True)
 
 
 class EvidenceLimits(ImmutableModel):
