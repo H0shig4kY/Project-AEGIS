@@ -194,6 +194,16 @@ timestamps, CRC and sizes. Gaps, overlapping regions, orphan payloads, prefixes,
 trailing data and inconsistent offsets are rejected before `ZipFile` allocation.
 Payload CRCs and manifest hashes are subsequently verified through bounded reads.
 
+Before constructing `ZipFile`, both physical filenames must be identical ASCII
+bytes, at most 128 characters, and match `manifest.json` or an allowed AEGIS
+member path. NUL, controls (including DEL), backslashes, absolute paths,
+drive/ADS syntax, empty/dot/traversal components, Windows reserved device names,
+forbidden Windows characters and trailing dots/spaces are rejected, never
+normalized. `ZipInfo.orig_filename` must also equal `ZipInfo.filename` as an
+additional defense. Rejection messages do not include the supplied filename.
+The generic `preflight` helper validates physical-name safety; package readers
+always additionally enable the closed AEGIS path grammar.
+
 Data descriptors, including otherwise valid streaming ZIP layouts, are not
 supported. Descriptor flags are rejected explicitly; there is no permissive
 fallback. Canonical AEGIS exports use seekable output and do not need descriptors.

@@ -107,7 +107,25 @@ def zip64_values(extra, values):
     return tuple(result)
 
 
-def preflight(stream, limits):
+def validate_zip_name(raw, *, aegis_paths=False):
+    """Validate physical bytes without platform-dependent path normalization."""
+    if not raw or len(raw) > 128 or any(byte < 32 or byte >= 127 for byte in raw):
+        failure()
+    name = raw.decode('ascii')
+    components = name.split('/')
+    reserved = {'CON', 'PRN', 'AUX', 'NUL'} | {
+        f'{prefix}{number}' for prefix in ('COM', 'LPT') for number in range(1, 10)}
+    if (any(character in name for character in '\\:<>"|?*') or
+            any(component in ('', '.', '..') or component.endswith(('.', ' ')) or
+                component.split('.')[0].upper() in reserved for component in components)):
+        failure()
+    if aegis_paths and name != 'manifest.json' and not any(
+            re.fullmatch(pattern, name) for pattern, _ in CATEGORIES.values()):
+        failure()
+    return name
+
+
+def preflight(stream, limits, *, aegis_paths=False):
     """Bound central-directory entry count before ZipFile allocates its inventory."""
     size = os.fstat(stream.fileno()).st_size
     if size > limits.max_archive_bytes or size < 22:
@@ -169,6 +187,7 @@ def preflight(stream, limits):
         if header[12] or header[3] & ~0x800 or header[4] != zipfile.ZIP_STORED:
             failure()  # No comments, encryption or data descriptors.
         name = stream.read(header[10])
+        validate_zip_name(name, aegis_paths=aegis_paths)
         extra = stream.read(header[11])
         uncompressed, compressed, local_offset = zip64_values(
             extra, (header[9], header[8], header[16]))
@@ -183,6 +202,7 @@ def preflight(stream, limits):
                 local_offset + 30 + local[9] + local[10] > offset):
             failure()
         local_name = stream.read(local[9])
+        validate_zip_name(local_name, aegis_paths=aegis_paths)
         local_extra = stream.read(local[10])
         local_uncompressed, local_compressed = zip64_values(local_extra, (local[8], local[7]))
         if (local_name != name or local[1:7] != (header[2],header[3],header[4],header[5],header[6],header[7]) or
@@ -232,13 +252,15 @@ class AssessmentPackageReader:
                 opened = os.fstat(stream.fileno())
                 if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
                     failure()
-                preflight(stream, self.limits)
+                preflight(stream, self.limits, aegis_paths=True)
                 with zipfile.ZipFile(stream) as archive:
                     infos = archive.infolist()
                     if len(infos) > self.limits.max_members or not infos or min(i.header_offset for i in infos) != 0:
                         failure()
                     names, total, metadata = set(), 0, 0
                     for info in infos:
+                        if info.orig_filename != info.filename:
+                            failure()
                         name = info.filename
                         mode = stat.S_IFMT(info.external_attr >> 16)
                         if (not name.isascii() or len(name) > 128 or name.casefold() in names or
