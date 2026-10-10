@@ -51,14 +51,17 @@ def test_snapshot_origin_must_match_record(setup, field, value):
     assert build_report(campaign)['schema_version'] == 1
 
 
-@pytest.mark.parametrize('component', ['results', 'data', 'file', 'integrity', 'missing', 'invalid'])
+@pytest.mark.parametrize('component', ['results', 'data', 'file', 'integrity', 'manifest', 'missing', 'invalid'])
 def test_observation_paths_rejected_before_locks(setup, monkeypatch, component):
     import stat
     campaign, finding, _ = setup
     path = result(campaign)
     target = {'results': path.parent, 'data': campaign.data_dir,
               'file': path, 'integrity': campaign.data_dir / 'integrity',
+              'manifest': campaign.data_dir / 'integrity' / 'results-manifest.json',
               'missing': path.parent, 'invalid': path.parent}[component]
+    if component == 'manifest':
+        target.parent.mkdir()
     original = Path.lstat
     def lstat(current, *args, **kwargs):
         if current == target:
@@ -189,3 +192,30 @@ def test_report_parser_and_extra_key_errors_do_not_disclose_secrets(setup, monke
     answer = invoke(campaign, ['findings', 'report', '--schema-version', '2'], monkeypatch)
     assert answer.exit_code == 1 and answer.stderr and answer.stdout == ''
     assert secret not in answer.output
+
+
+@pytest.mark.parametrize('component', ['results', 'data', 'file'])
+def test_actual_source_symlinks_are_rejected(setup, tmp_path, monkeypatch, component):
+    import stat
+    campaign, finding, _ = setup
+    path = result(campaign)
+    target = {'results': path.parent, 'data': campaign.data_dir, 'file': path}[component]
+    if os.name == 'posix':
+        external = tmp_path / 'external'
+        target.rename(external)
+        target.symlink_to(external, target_is_directory=component != 'file')
+    else:
+        # Windows symlink creation privileges are not assumed: simulate the
+        # filesystem reparse attribute, exercising the same rejection path.
+        original = Path.lstat
+        def lstat(current, *args, **kwargs):
+            if current == target:
+                return SimpleNamespace(st_mode=stat.S_IFDIR if component != 'file' else stat.S_IFREG,
+                                       st_file_attributes=0x400)
+            return original(current, *args, **kwargs)
+        monkeypatch.setattr(Path, 'lstat', lstat)
+    answer = invoke(campaign, ['findings', 'evidence', 'add-observation', finding.finding_id,
+        '--result', path.name, '--index', '0', '--actor', 'audit', '--reason', 'test'], monkeypatch)
+    assert answer.exit_code == 1 and 'symlink' in answer.stderr.lower()
+    assert answer.stdout == '' and 'Traceback' not in answer.output
+    assert not campaign.evidence_dir.exists()
