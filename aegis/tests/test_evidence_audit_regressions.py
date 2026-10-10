@@ -228,3 +228,59 @@ def test_actual_source_symlinks_are_rejected(setup, tmp_path, monkeypatch, compo
     assert answer.exit_code == 1 and 'symlink' in answer.stderr.lower()
     assert answer.stdout == '' and 'Traceback' not in answer.output
     assert not campaign.evidence_dir.exists()
+
+
+@pytest.mark.parametrize('literal,nesting', [
+    ('1e10000', 'object'), ('-1e10000', 'object'),
+    ('1e10000', 'nested-object'), ('-1e10000', 'nested-array'),
+    ('NaN', 'object'), ('Infinity', 'object'), ('-Infinity', 'object'),
+    ('1.7976931348623157e308', 'nested-array'),
+    ('-1.7976931348623157e308', 'nested-object'),
+    ('1e-10000', 'object'), ('42', 'object'), ('canonical', 'object')])
+def test_snapshot_numeric_values_are_strict(setup, monkeypatch, literal, nesting):
+    from aegis.provenance import build_observation_id
+    from aegis.results import Observation
+    campaign, finding, _ = setup
+    path = result(campaign)
+    record = EvidenceManager(campaign).attach_observation(finding.finding_id, path.name, 0,
+        actor='audit', reason='numeric regression')
+    root = campaign.evidence_dir / 'managed-v1'
+    content = (root / 'objects' / (record.content_sha256 + '.blob')).read_bytes()
+    invalid = literal in {'1e10000', '-1e10000', 'NaN', 'Infinity', '-Infinity'}
+    secret = 'NUMERIC_PRIVATE_MARKER_219'
+    if literal != 'canonical':
+        snapshot = json.loads(content)
+        number = json.loads(literal)
+        value = {'number': number}
+        if nesting == 'nested-object':
+            value = {'outer': {'inner': value}}
+        elif nesting == 'nested-array':
+            value = [[value]]
+        snapshot['observation']['data'] = {'value': value, 'private': secret}
+        snapshot['origin']['observation_id'] = build_observation_id(record.origin.plugin,
+            Observation.model_validate(snapshot['observation']))
+        encoded = json.dumps(snapshot)
+        numeric_token = json.dumps(number)
+        content = encoded.replace(numeric_token, literal).encode()
+        digest = hashlib.sha256(content).hexdigest()
+        (root / 'objects' / (digest + '.blob')).write_bytes(content)
+        payload = record.model_dump(mode='json')
+        payload.update(origin=snapshot['origin'], content_sha256=digest, content_size=len(content))
+        payload['deduplication_key'] = association_key(record.finding_id, record.kind,
+            ObservationOrigin.model_validate(payload['origin']), digest)
+        (root / 'records' / (record.evidence_id + '.json')).write_text(json.dumps(payload))
+    reader = EvidenceReader(campaign)
+    if invalid:
+        with pytest.raises(StorageIntegrityError) as caught:
+            reader.verify(record.evidence_id)
+        assert secret not in str(caught.value)
+        with pytest.raises(StorageIntegrityError) as caught:
+            build_report(campaign, schema_version=2)
+        assert secret not in str(caught.value)
+        answer = invoke(campaign, ['findings', 'report', '--schema-version', '2'], monkeypatch)
+        assert answer.exit_code == 1 and answer.stdout == '' and answer.stderr
+        assert secret not in answer.output and 'Traceback' not in answer.output
+    else:
+        assert reader.verify(record.evidence_id)['status'] == 'verified'
+        assert build_report(campaign, schema_version=2)['schema_version'] == 2
+    assert build_report(campaign)['schema_version'] == 1

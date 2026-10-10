@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import math
 import os
 import re
 import stat
@@ -32,6 +33,14 @@ def _unique_members(pairs):
 
 def _invalid_constant(_value):
     raise ValueError('Nonfinite observation snapshot value')
+
+
+def _finite_float(value):
+    # parse_constant does not see numeric literals that overflow to infinity.
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError('Nonfinite observation snapshot value')
+    return number
 
 
 def association_key(finding_id, kind, origin, content_sha256):
@@ -179,7 +188,7 @@ class EvidenceReader:
                 raise ValueError('Evidence content digest or size mismatch')
             if record.representation == 'observation-json-v1':
                 snapshot = json.loads(snapshot_bytes, object_pairs_hook=_unique_members,
-                                      parse_constant=_invalid_constant)
+                                      parse_constant=_invalid_constant, parse_float=_finite_float)
                 if (not isinstance(snapshot, dict) or
                         set(snapshot) != {'schema_version', 'origin', 'observation'} or
                         type(snapshot['schema_version']) is not int or snapshot['schema_version'] != 1):
