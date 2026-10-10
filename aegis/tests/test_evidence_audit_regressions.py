@@ -251,7 +251,8 @@ def test_snapshot_numeric_values_are_strict(setup, monkeypatch, literal, nesting
     if literal != 'canonical':
         snapshot = json.loads(content)
         number = json.loads(literal)
-        value = {'number': number}
+        numeric_leaf = {'number': number}
+        value = numeric_leaf
         if nesting == 'nested-object':
             value = {'outer': {'inner': value}}
         elif nesting == 'nested-array':
@@ -259,9 +260,11 @@ def test_snapshot_numeric_values_are_strict(setup, monkeypatch, literal, nesting
         snapshot['observation']['data'] = {'value': value, 'private': secret}
         snapshot['origin']['observation_id'] = build_observation_id(record.origin.plugin,
             Observation.model_validate(snapshot['observation']))
-        encoded = json.dumps(snapshot)
-        numeric_token = json.dumps(number)
-        content = encoded.replace(numeric_token, literal).encode()
+        # Replace only the selected numeric leaf, never matching numbers in
+        # timestamps or other provenance strings.
+        placeholder = 'NUMERIC_LITERAL_PLACEHOLDER'
+        numeric_leaf['number'] = placeholder
+        content = json.dumps(snapshot).replace(json.dumps(placeholder), literal).encode()
         digest = hashlib.sha256(content).hexdigest()
         (root / 'objects' / (digest + '.blob')).write_bytes(content)
         payload = record.model_dump(mode='json')
