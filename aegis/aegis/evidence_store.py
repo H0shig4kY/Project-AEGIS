@@ -159,6 +159,10 @@ class EvidenceReader:
         self._layout()
         with directory_lock(self.root, create=False):
             self._layout()
+            from aegis.custody import CustodyReader
+            custody = CustodyReader(self.campaign)
+            if custody.exists():
+                custody.verify()
             yield
 
     @staticmethod
@@ -303,5 +307,8 @@ class EvidenceStore(EvidenceReader):
             raise StorageIntegrityError('Existing evidence object conflicts with captured content')
 
     def publish_record(self, record):
+        from aegis.custody import CustodyReader
+        if CustodyReader(self.campaign).exists():
+            raise StorageIntegrityError('Active custody requires the recoverable publication protocol')
         self._publish(self.records_dir / (record.evidence_id + '.json'),
                       canonical(record.model_dump(mode='json')))
