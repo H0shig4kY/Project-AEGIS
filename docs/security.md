@@ -89,8 +89,11 @@ links/special types, opaque comments/extras, descriptors, hidden physical region
 contradictory ZIP64, invalid JSON and nonfinite numbers are rejected.
 It does not extract, execute, import or access a network.
 
-New evidence/custody/package paths sanitize expected validation errors. This does not
-promise that every legacy CLI error is path-free or every diagnostic is safe to publish.
-Avoid putting secrets in selectors/arguments, and review stdout/stderr before sharing.
+Pydantic and parsing diagnostics handled by the sanitization helpers omit untrusted
+input values, validator context and parser excerpts. Other operational, filesystem
+or local validation errors, including evidence-command errors, may contain supplied
+names or paths. Do not assume stderr, logs or error messages are free of sensitive
+information. Avoid putting secrets in selectors/arguments, and review diagnostics
+and stdout/stderr before sharing.
 Follow [recovery](recovery.md) rather than removing evidence or bypassing validation.
 Signing, encryption, authenticated identities and key management remain unimplemented.

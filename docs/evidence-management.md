@@ -141,7 +141,13 @@ publication or synchronization preserves remaining temporaries and orphan object
 
 There is no guaranteed rollback after publication. A directory-sync failure after
 record publication can return an error with a complete association already present.
-Retrying/re-querying discovers the original UUID without duplicating the record.
+Without activated custody, retrying or querying may recover the reference to an
+already published association, subject to content validation and the applicable
+deduplication rules, including matching audit metadata. With activated custody and
+a pending operation, relevant reads and retries fail closed; they do not recover
+automatically. Complete [explicit custody recovery](recovery.md#pending-custody-operations)
+successfully before retrying or querying. Preserve intents, receipts and events;
+do not delete them to bypass a pending operation.
 Readers reject invalid metadata, duplicate association keys, missing/corrupt blobs,
 invalid layout, inaccessible storage and enumeration failures. An existing managed
 root missing required directories is incomplete and is not reinitialized. A wholly
@@ -186,9 +192,13 @@ Read commands return metadata only. Verification is transient and never persists
 verified timestamp. JSON stdout contains no decorative messages. Normal errors
 use stderr and exit 1; CLI argument errors exit 2. File inputs and observations are
 explicitly chosen by the operator, not automatically attributed to findings.
-Validation diagnostics omit input values, validator context and parser excerpts.
-Only known schema field names and error categories are displayed; unknown mapping
-keys are redacted. Symlink-resolution cycles produce a controlled, path-free error
+Pydantic validation diagnostics handled by the sanitization helpers omit input
+values and validator context; handled parsing diagnostics omit parser excerpts.
+Those Pydantic summaries display only known schema field names and error categories;
+unknown mapping keys are redacted. Other operational, filesystem or local validation
+errors may include supplied names or paths. Do not assume stderr, logs or error
+messages are free of sensitive information; review them before sharing.
+Symlink-resolution cycles produce a controlled, path-free error
 in both Python 3.12 and 3.13. Unrelated RuntimeError exceptions are not masked.
 
 ## Opt-in reporting schema 2
