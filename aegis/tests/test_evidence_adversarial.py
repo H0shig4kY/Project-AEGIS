@@ -171,3 +171,38 @@ def test_windows_reparse_attribute_is_rejected_on_regular_file(setup, monkeypatc
     with pytest.raises(ValueError, match='regular file'):
         attach(setup)
     assert not campaign.evidence_dir.exists()
+
+
+def test_cooperative_config_writer_cannot_change_limits_during_capture(setup, monkeypatch):
+    import threading
+    from aegis.atomic_storage import atomic_write_text
+    campaign, _, _ = setup
+    finished = threading.Event()
+    started = threading.Event()
+    errors = []
+    def write():
+        started.set()
+        try:
+            atomic_write_text(campaign.config_file,
+                'name: Test\nevidence:\n  max_object_bytes: 1\n  max_assessment_bytes: 1\n')
+        except Exception as error:
+            errors.append(error)
+        finally:
+            finished.set()
+    original = os.read
+    threads = []
+    def read(descriptor, size):
+        if not threads:
+            thread = threading.Thread(target=write); threads.append(thread); thread.start()
+            assert started.wait(2)
+            assert not finished.wait(0.05), 'configuration writer bypassed evidence operation lock'
+        return original(descriptor, size)
+    monkeypatch.setattr(os, 'read', read)
+    try:
+        record = attach(setup)
+    finally:
+        for thread in threads:
+            thread.join(10)
+            assert not thread.is_alive()
+    assert not errors
+    assert EvidenceReader(campaign).get(record.evidence_id)
