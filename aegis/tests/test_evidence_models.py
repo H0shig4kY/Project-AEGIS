@@ -23,7 +23,8 @@ def test_record_is_immutable_and_roundtrips():
 
 @pytest.mark.parametrize('field,value', [('finding_id', '../file'), ('evidence_id', 'x'),
     ('actor', ' '), ('reason', ''), ('content_size', -1), ('content_size', True),
-    ('registered_at', datetime(2026, 1, 1)), ('content_sha256', 'z' * 64)])
+    ('registered_at', datetime(2026, 1, 1)), ('content_sha256', 'z' * 64),
+    ('schema_version', True), ('source_integrity', 'original')])
 def test_invalid_record_fields(field, value):
     data = payload(); data[field] = value
     with pytest.raises(ValidationError):
