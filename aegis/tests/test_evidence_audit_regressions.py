@@ -143,7 +143,7 @@ def test_unrelated_runtime_error_is_not_masked(setup, monkeypatch):
             pass
 
 
-@pytest.mark.parametrize('damage', ['observation', 'schema', 'origin', 'deep-json', 'duplicate-key'])
+@pytest.mark.parametrize('damage', ['observation', 'schema', 'origin', 'deep-json', 'duplicate-key', 'nonfinite'])
 def test_inconsistent_snapshot_bytes_are_rejected_even_with_updated_hash(setup, damage):
     campaign, finding, _ = setup
     path = result(campaign)
@@ -157,6 +157,12 @@ def test_inconsistent_snapshot_bytes_are_rejected_even_with_updated_hash(setup, 
         raw['schema_version'] = True
     elif damage == 'origin':
         raw['origin']['observation_id'] = 'f' * 64
+    elif damage == 'nonfinite':
+        from aegis.results import Observation
+        from aegis.provenance import build_observation_id
+        raw['observation']['data'] = {'number': float('nan')}
+        raw['origin']['observation_id'] = build_observation_id(record.origin.plugin,
+            Observation.model_validate(raw['observation']))
     content = b'[' * 20000 + b'0' + b']' * 20000 if damage == 'deep-json' else json.dumps(raw).encode()
     if damage == 'duplicate-key':
         content = content.replace(b'"schema_version": 1', b'"schema_version": 999, "schema_version": 1')
@@ -164,7 +170,10 @@ def test_inconsistent_snapshot_bytes_are_rejected_even_with_updated_hash(setup, 
     (root / 'objects' / (digest + '.blob')).write_bytes(content)
     payload = record.model_dump(mode='json'); payload['content_sha256'] = digest
     payload['content_size'] = len(content)
-    payload['deduplication_key'] = association_key(record.finding_id, record.kind, record.origin, digest)
+    if damage == 'nonfinite':
+        payload['origin'] = raw['origin']
+    payload['deduplication_key'] = association_key(record.finding_id, record.kind,
+        ObservationOrigin.model_validate(payload['origin']), digest)
     (root / 'records' / (record.evidence_id + '.json')).write_text(json.dumps(payload))
     with pytest.raises(StorageIntegrityError):
         EvidenceReader(campaign).verify(record.evidence_id)
