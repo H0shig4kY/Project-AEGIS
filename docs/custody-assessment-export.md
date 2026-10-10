@@ -18,12 +18,12 @@ are reported as anomalies; sequence numbers are authoritative.
 ## CLI
 
 ```bash
-aegis assessment custody init --actor operator --reason 'Activate custody'
-aegis findings evidence add-file <finding-id> capture.bin --actor operator --reason 'Capture'
+aegis assessment custody init --actor operator --reason "Activate custody"
+aegis findings evidence add-file <finding-id> capture.bin --actor operator --reason "Capture"
 aegis findings evidence custody-history <evidence-id> --json
 aegis assessment custody verify --json
 aegis assessment custody verify --checkpoint trusted-checkpoint.json --json
-aegis assessment custody recover --actor operator --reason 'Interrupted publication'
+aegis assessment custody recover --actor operator --reason "Interrupted publication"
 aegis assessment export --output /external/share.zip
 aegis assessment export --output /external/forensic.zip --profile forensic
 aegis assessment export --output /external/with-objects.zip --profile forensic --include-objects
@@ -116,7 +116,8 @@ hash/checkpoint supplied by a separately trusted channel.
 Verification separates `package_integrity`, `custody.status`,
 `custody.external_checkpoint_match`, `evidence[].metadata_status`, and
 `evidence[].content_status`. A failed attempt raises an integrity exception and is
-classified as `verification_failed`, never a valid package result.
+reported as a controlled CLI error (stderr and nonzero exit), with no valid
+package result. `verification_failed` is not an emitted success-result status.
 
 * `not_initialized`: no activated source chain.
 * `checkpoint_only`: events omitted; no independent chain verification.
@@ -223,3 +224,12 @@ sizes are summed during this pass, including the manifest. Bytes outside the
 inventoried layout are rejected rather than excluded from content accounting.
 These restrictions define the AEGIS subset; general-purpose ZIP variants outside
 it are unsupported, even if another ZIP reader accepts them.
+
+## Operational guides
+
+See [quickstart](quickstart.md), [security and checkpoints](security.md#external-checkpoints)
+and [recovery](recovery.md) for end-to-end use and preservation-first diagnosis.
+The `/external/` paths above are illustrative POSIX destinations. On Windows use
+an existing absolute external destination such as `"C:\AEGIS-Exports\share.zip"`;
+export paths containing `..` are rejected;
+quoted reasons use double quotes in POSIX, PowerShell and CMD.

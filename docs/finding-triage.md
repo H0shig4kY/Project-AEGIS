@@ -65,7 +65,8 @@ text in plaintext. Directory permissions remain the deployment's responsibility.
 
 ## Validation
 
-Baseline on current main (`b96eed6`): 380 tests passed locally on Python 3.12.
+Historical Sprint 1 baseline (`b96eed6`): 380 tests passed locally on Python 3.12.
+This is not a current-suite count.
 Tests were committed before implementation and initially failed with
 `ModuleNotFoundError: aegis.finding_triage`. New tests cover the full transition
 matrix, input validation, missing findings, repeated operations, reopening stores,

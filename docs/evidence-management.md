@@ -130,14 +130,24 @@ locking after the established finding/history/assessment locks.
 
 Content is completely written, flushed and fsynced in staging, then published with
 an exclusive hard link. Its bytes are verified before the JSON record is published
-the same way. The JSON record is the authoritative association and audit commit
-marker; there is no separate multi-file audit write and no evidence WAL.
+the same way. Without activated custody, the JSON record is the authoritative
+association and audit commit marker; there is no separate evidence WAL. After
+Sprint 7 custody activation, a record alone is not a completed operation: the
+intent, chained event and completion receipt are also required. Dedicated readers
+reject pending operations rather than recovering them. See
+[custody publication](custody-assessment-export.md#storage-and-publication).
 Successful publication removes only its own temporary link. A failed write,
 publication or synchronization preserves remaining temporaries and orphan objects.
 
 There is no guaranteed rollback after publication. A directory-sync failure after
 record publication can return an error with a complete association already present.
-Retrying/re-querying discovers the original UUID without duplicating the record.
+Without activated custody, retrying or querying may recover the reference to an
+already published association, subject to content validation and the applicable
+deduplication rules, including matching audit metadata. With activated custody and
+a pending operation, relevant reads and retries fail closed; they do not recover
+automatically. Complete [explicit custody recovery](recovery.md#pending-custody-operations)
+successfully before retrying or querying. Preserve intents, receipts and events;
+do not delete them to bypass a pending operation.
 Readers reject invalid metadata, duplicate association keys, missing/corrupt blobs,
 invalid layout, inaccessible storage and enumeration failures. An existing managed
 root missing required directories is incomplete and is not reinitialized. A wholly
@@ -182,9 +192,13 @@ Read commands return metadata only. Verification is transient and never persists
 verified timestamp. JSON stdout contains no decorative messages. Normal errors
 use stderr and exit 1; CLI argument errors exit 2. File inputs and observations are
 explicitly chosen by the operator, not automatically attributed to findings.
-Validation diagnostics omit input values, validator context and parser excerpts.
-Only known schema field names and error categories are displayed; unknown mapping
-keys are redacted. Symlink-resolution cycles produce a controlled, path-free error
+Pydantic validation diagnostics handled by the sanitization helpers omit input
+values and validator context; handled parsing diagnostics omit parser excerpts.
+Those Pydantic summaries display only known schema field names and error categories;
+unknown mapping keys are redacted. Other operational, filesystem or local validation
+errors may include supplied names or paths. Do not assume stderr, logs or error
+messages are free of sensitive information; review them before sharing.
+Symlink-resolution cycles produce a controlled, path-free error
 in both Python 3.12 and 3.13. Unrelated RuntimeError exceptions are not masked.
 
 ## Opt-in reporting schema 2
@@ -217,5 +231,6 @@ oversized records, silent short writes and linked source parents. Fault injectio
 uses temporary assessments only. Coverage includes real subprocess CLI, threads
 and spawned processes, quotas, read-only source bytes/mtime, retained orphans,
 post-publication failures, legacy schema 1 and verified schema 2.
-Final suite/CI results are reported in the PR. An independent audit is required
-before recommending integration; no merge is authorized by this sprint.
+These are historical Sprint 6 validation notes; the final results and independent
+review belong to [PR #7](https://github.com/H0shig4kY/Project-AEGIS/pull/7).
+Sprint 6 is integrated at the post-Sprint-7 documentation baseline.

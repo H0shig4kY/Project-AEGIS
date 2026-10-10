@@ -1,387 +1,102 @@
-# AEGIS / ARGUS
+# AEGIS / ARGUS framework
 
-**Authorized Reconnaissance, Asset Discovery and Lifecycle Analysis Engine**
+AEGIS is the implemented authorized-assessment framework in [Project AEGIS](../README.md).
+ARGUS is its reconnaissance and observation layer. The Python distribution is
+`aegis-pentest`; the installed executable is `aegis`.
 
-AEGIS is an evidence-driven security assessment framework for authorized reconnaissance, asset discovery, provenance tracking, relationship analysis, integrity verification, and temporal change detection.
+## Capabilities
 
-**ARGUS** is the reconnaissance and observation layer used by AEGIS to execute plugins and turn observations into persistent assessment state.
+The framework manages authorized scope, plugin results and integrity baselines,
+assets/relations and lifecycle changes, findings and technical history. Operational
+triage is independent of technical resolution. Managed evidence, optional custody
+and portable assessment exports extend these records without changing finding states.
 
-> AEGIS is intended for systems and environments where you have explicit authorization to perform security assessment and reconnaissance.
-
-## Why AEGIS?
-
-Traditional reconnaissance commonly produces isolated snapshots. AEGIS is designed to preserve state between executions so an assessment can answer not only **what exists now**, but also:
-
-- What was discovered?
-- Where did the evidence come from?
-- Which assets are related?
-- What disappeared?
-- Was the disappearance transient or persistent?
-- What became inactive?
-- What later reappeared?
-- Which stored result supports the observation?
-- Has that stored result changed since it was recorded?
-
-## Current capabilities
-
-- Explicit campaign scope management
-- Plugin-based reconnaissance
-- DNS resolution
-- HTTP probing
-- Service discovery and fingerprinting
-- TLS and certificate inspection
-- Typed asset inventory
-- Asset metadata and provenance
-- Relationship graph
-- Asset and relation lifecycle tracking
-- Candidate-missing detection
-- Inactivation after repeated absence
-- Reactivation detection
-- Change history
-- SHA-256 result integrity baselines
-- Integrity verification
-- Retrospective baselining of legacy results
-- Human-readable Rich terminal interface
-- JSON output for change records
-
-## Core model
-
-AEGIS turns plugin observations into a persistent assessment model:
-
-```text
-Authorized Scope
-      |
-      v
- ARGUS Plugin
-      |
-      v
-  Observation
-      |
-      +------------------+
-      |                  |
-      v                  v
-    Asset  ----------> Relation
-      |                  |
-      +--------+---------+
-               |
-               v
-           Lifecycle
-               |
-               v
-             Change
-               |
-               v
-     Evidence / Provenance
-```
-
-### Tracked relationships
-
-Current relationship modelling includes:
-
-```text
-DOMAIN  --resolves_to-->  IP
-DOMAIN  --exposes----->   SERVICE
-SERVICE --presents---->   CERTIFICATE
-```
-
-## Lifecycle model
-
-AEGIS deliberately distinguishes a first missing observation from confirmed inactivation.
-
-```text
-ACTIVE
-  |
-  | first covered execution where object is absent
-  v
-CANDIDATE_MISSING
-  |
-  | repeated covered absence
-  v
-INACTIVE
-  |
-  | observed again
-  v
-REACTIVATED
-  |
-  v
-ACTIVE
-```
-
-This model applies to tracked assets and relationships where the relevant plugin execution provides sufficient coverage.
-
-## Built-in reconnaissance
-
-The current CLI exposes the following plugin workflow:
-
-```bash
-aegis plugin list
-
-aegis plugin run dns
-aegis plugin run service
-aegis plugin run tls
-aegis plugin run http
-```
-
-Plugin execution persists the raw result, establishes an integrity baseline, processes accepted observations into assets and relations, and integrates lifecycle change processing.
+- Scope accepts domain, wildcard, IP and CIDR targets, not URLs or `host:port` targets.
+- Plugins cover DNS, HTTP, services and TLS. Running a plugin can access the network.
+- Findings support querying, technical history and acknowledge/suppress/unsuppress.
+- Reports use JSON or Markdown; schema 1 is default, schema 2 explicitly verifies managed evidence metadata.
+- Evidence supports local files, snapshots of existing observations and non-fetched external references.
+- Custody is opt-in, uses declared identities and hash-chained events, and recovers only explicitly.
+- ZIP exports use `share` by default or explicit `forensic`, with objects only when explicitly requested.
 
 ## Installation
 
-From the project root, install the package using the packaging configuration in `pyproject.toml`.
+Python >=3.12 is required by `pyproject.toml`. CI tests Python 3.12/3.13 on Linux
+and Windows. From the **repository root**:
 
-For development, install the project and its development dependencies according to your local Python workflow, then verify the CLI:
-
-```bash
-aegis
+```console
+python -m pip install -e ./aegis
+aegis --help
 aegis version
-aegis info
 ```
 
-## Quick start
+Use a virtual environment. See the complete [installation guide](../docs/installation.md)
+for Linux, PowerShell and CMD. If already inside this `aegis/` directory, the
+editable install path is `.` instead of `./aegis`.
 
-Create a campaign:
+## Usage and command discovery
 
-```bash
-aegis init assessment
-cd assessment
-```
+Run assessment commands inside a directory containing `aegis.yaml`, or below it.
+The nearest ancestor with that file determines the assessment. Package verification
+and inspection work independently of a local assessment.
 
-Add an authorized target:
-
-```bash
-aegis scope add example.com
+```console
+aegis init demo-assessment
+cd demo-assessment
+aegis scope add 127.0.0.1
 aegis scope list
+aegis findings report --format json
+aegis findings --help
+aegis assessment --help
 ```
 
-Inspect available plugins:
+See the [offline quickstart](../docs/quickstart.md) for findings, triage, evidence,
+custody and export. For existing records, representative query syntax is:
 
-```bash
-aegis plugin list
+```console
+aegis assets history service example.test:443
+aegis relations history domain example.test resolves_to ip 192.0.2.1
+aegis changes list --target-value 192.0.2.1
 ```
 
-Run reconnaissance:
+These values are illustrative; no records or scan results are promised.
+`aegis` prints a landing/reference view, not an interactive shell.
+`aegis commands` is a partial convenience list and does not yet include all recent
+operations. The [complete command reference](COMMANDS.md) and each command's
+`--help` are authoritative for this baseline.
 
-```bash
-aegis plugin run dns
-aegis plugin run service
-aegis plugin run tls
-aegis plugin run http
+## Storage and effects
+
+An assessment contains `aegis.yaml`, authorized scope, `data/`, `evidence/` and
+`reports/`. Technical finding state and operational triage state are separate.
+Normal store queries can initialize directories/locks or recover pending triage
+operations. They are not forensic read-only projections.
+
+Findings reporting, managed-evidence readers, custody readers and package readers
+use dedicated non-recovering paths. Assessment export reads the source and writes
+an exclusive package outside it. See [architecture](../docs/architecture.md) and
+[recovery](../docs/recovery.md) for the boundaries.
+
+## Development and validation
+
+From the repository root in an activated virtual environment:
+
+```console
+python -m pip install -e "./aegis[dev]"
+cd aegis
+python -m pytest -v
+python -m pytest tests/test_change_engine.py -v
 ```
 
-Inspect the resulting assessment state:
+Counts belong to individual runs, not a permanent release guarantee. The
+[CI workflow](../.github/workflows/tests.yml) runs the suite on Linux/Windows and
+Python 3.12/3.13. Historical counts in sprint documents describe their original
+baselines. This documentation refresh changes no Python, tests or workflow.
 
-```bash
-aegis assets list
-aegis relations list
-aegis changes list
-aegis results list
-```
+## Further reading
 
-Inspect a graph rooted at a domain:
-
-```bash
-aegis assets graph example.com --type domain
-```
-
-Inspect related assets:
-
-```bash
-aegis assets related domain example.com
-```
-
-Inspect lifecycle history:
-
-```bash
-aegis assets history service example.com:443
-aegis relations history domain example.com resolves_to ip 
-```
-
-Verify persisted evidence:
-
-```bash
-aegis results verify-all
-aegis results integrity-summary
-```
-
-## Campaign structure
-
-`aegis init <name>` creates a campaign directory and initializes the AEGIS configuration together with campaign data directories, including:
-
-```text
-assessment/
-├── aegis.yaml
-├── data/
-├── evidence/
-└── reports/
-```
-
-Additional persisted stores are managed by the application within the campaign.
-
-## CLI
-
-Running:
-
-```bash
-aegis
-```
-
-opens the Rich-based AEGIS / ARGUS command interface.
-
-Top-level command groups include:
-
-```text
-version
-info
-commands
-init
-scope
-plugin
-assets
-relations
-changes
-results
-```
-
-For a practical command reference, see [`COMMANDS.md`](COMMANDS.md).
-
-## Assets and provenance
-
-Discovered assets are persisted as typed objects. Depending on the observation, an asset may include:
-
-- Type and value
-- Discovery source
-- Metadata
-- First-seen and last-seen timestamps
-- Last-confirmed timestamp
-- Seen count
-- Active/inactive state
-- Observation provenance
-- Plugin and plugin version
-- Result file
-- Result identifier
-- Result SHA-256
-
-This allows an asset to remain linked to the evidence that produced it.
-
-## Relations
-
-AEGIS stores relationships independently from assets and gives them their own lifecycle and provenance.
-
-Examples:
-
-```text
-DOMAIN example.com
-  --resolves_to--> IP 
-
-DOMAIN example.com
-  --exposes--> SERVICE example.com:443
-
-SERVICE example.com:443
-  --presents--> CERTIFICATE <sha256>
-```
-
-Relations can be queried directly, traversed from assets, and inspected historically.
-
-## Change detection
-
-The change engine processes missing and reactivated state transitions around observation processing.
-
-This ordering is important:
-
-```text
-1. Execute plugin
-2. Persist current raw result
-3. Locate previous comparable result where applicable
-4. Detect covered objects that are missing
-5. Apply candidate-missing / inactive lifecycle logic
-6. Calculate and store result integrity baseline
-7. Process current observations
-8. Promote accepted assets and relations
-9. Detect reactivations
-10. Present execution summary
-```
-
-Change records can reference both the previous and current result files.
-
-## Result integrity
-
-New plugin results receive an **ORIGINAL** SHA-256 baseline.
-
-AEGIS can:
-
-```bash
-aegis results verify <filename>
-aegis results verify-all
-aegis results integrity-summary
-aegis results integrity-show <filename>
-```
-
-Legacy results without an existing integrity baseline can be given a retrospective baseline:
-
-```bash
-aegis results baseline-legacy
-```
-
-Integrity verification distinguishes states such as:
-
-```text
-OK
-BASELINED
-FAILED
-UNKNOWN
-CONFLICT
-```
-
-## JSON output
-
-Lifecycle changes can be consumed programmatically:
-
-```bash
-aegis changes list --json
-```
-
-The JSON representation distinguishes asset changes from relation changes and includes lifecycle state, plugin, target, timestamps, and previous/current result references.
-
-## Development and testing
-
-Run the complete test suite:
-
-```bash
-pytest
-```
-
-Run a focused test module:
-
-```bash
-pytest tests/test_change_engine.py -v
-```
-
-The current development state has been validated with **283 passing tests**.
-
-## Project status
-
-AEGIS is currently under active development and is versioned as **0.1.0** in the CLI.
-
-The current implementation already provides the foundations of a stateful assessment engine:
-
-```text
-Scope
-  -> Reconnaissance
-  -> Observations
-  -> Assets
-  -> Relations
-  -> Provenance
-  -> Lifecycle
-  -> Changes
-  -> Integrity
-```
-
-The goal is not merely to collect scan output. The goal is to maintain an evidence-backed historical model of an assessed attack surface.
-
-## Documentation
-
-- [`COMMANDS.md`](COMMANDS.md) — CLI command reference and examples.
-- [`PRESENTATION.md`](PRESENTATION.md) — project overview and presentation narrative.
-
-## Responsible use
-
-Use AEGIS only against systems, infrastructure, and environments for which you have explicit authorization. Scope enforcement is a core design principle of the project, but authorization remains the operator's responsibility.
+- [Commands](COMMANDS.md) and [presentation](PRESENTATION.md).
+- [Documentation index](../docs/README.md).
+- [Security](../docs/security.md): authorized use, plaintext, unsigned hashes,
+  checkpoints, cooperative locks and platform limitations.
+- [Roadmap](../ROADMAP.md): completed deliveries and uncommitted proposals.
