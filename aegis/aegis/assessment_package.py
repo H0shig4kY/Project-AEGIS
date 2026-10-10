@@ -14,12 +14,13 @@ from pathlib import Path
 
 from aegis.atomic_storage import StorageIntegrityError, directory_lock, sync_directory
 from aegis.custody import (CustodyReader, canonical, digest, read, scan, strict_json,
-                          validate_event, identifier)
+                          validate_event, identifier, validate_baseline)
 from aegis.evidence_models import EvidenceRecord, ObservationOrigin
 from aegis.evidence_store import EvidenceReader, association_key, read_regular, validate_storage_path
 from aegis.finding_store import FindingStore
+from aegis.finding_history_store import FindingHistoryStore
 from aegis.findings_report import build_report
-from aegis.models import FindingState, FindingTriageState, FindingEventType
+from aegis.models import FindingState, FindingTriageState
 from aegis.provenance import build_observation_id
 from aegis.results import Observation
 from aegis import triage_journal
@@ -98,23 +99,52 @@ def preflight(stream, limits):
     eocd = struct.unpack('<4sHHHHLLH', tail[index:index+22])
     if eocd[1] or eocd[2] or eocd[7]:
         failure()
+    absolute = size - len(tail) + index
     count, directory_size, offset = eocd[4], eocd[5], eocd[6]
-    if count == 65535 or directory_size == 0xffffffff or offset == 0xffffffff:
-        absolute = size - len(tail) + index
-        if absolute < 20:
-            failure()
+    central_end = absolute
+    locator = None
+    if absolute >= 20:
         stream.seek(absolute - 20)
-        locator = struct.unpack('<4sLQL', stream.read(20))
-        if locator[0] != b'PK\x06\x07' or locator[1] or locator[3] != 1:
+        candidate = stream.read(20)
+        if candidate.startswith(b'PK\x06\x07'):
+            locator = struct.unpack('<4sLQL', candidate)
+    if locator is not None:
+        if locator[1] or locator[3] != 1 or locator[2] + 56 != absolute - 20:
             failure()
         stream.seek(locator[2])
         record = struct.unpack('<4sQHHLLQQQQ', stream.read(56))
         if record[0] != b'PK\x06\x06' or record[1] != 44 or record[4] or record[5] or record[6] != record[7]:
             failure()
+        for declared, actual, marker in ((eocd[3],record[6],65535),
+                (count,record[7],65535),(directory_size,record[8],0xffffffff),
+                (offset,record[9],0xffffffff)):
+            if declared != marker and declared != actual:
+                failure()
         count, directory_size, offset = record[7], record[8], record[9]
-    elif eocd[3] != count:
+        central_end = locator[2]
+    elif directory_size == 0xffffffff or offset == 0xffffffff or eocd[3] != count:
+        # Exactly 65,535 entries can be a legitimate non-ZIP64 archive.
+        # A missing locator is safe only when the actual bounded count matches.
         failure()
-    if count > limits.max_members or directory_size > limits.max_members*512 or offset + directory_size > size:
+    if count > limits.max_members or directory_size > limits.max_members*512 or offset + directory_size != central_end:
+        failure()
+    # ZipFile ignores the advertised entry count when allocating ZipInfo objects.
+    # Walk fixed-size central headers first, with O(1) additional memory and a
+    # bounded number of reads. No inventory objects exist at this stage.
+    stream.seek(offset)
+    actual = 0
+    while stream.tell() < central_end:
+        if central_end - stream.tell() < 46:
+            failure()
+        header = struct.unpack('<4s6H3L5H2L', stream.read(46))
+        actual += 1
+        variable = header[10] + header[11] + header[12]
+        if (header[0] != b'PK\x01\x02' or actual > limits.max_members or
+                header[10] > 128 or variable > 466 or header[13] or
+                stream.tell() + variable > central_end):
+            failure()
+        stream.seek(variable, 1)
+    if actual != count:
         failure()
     stream.seek(0)
 
@@ -366,10 +396,7 @@ class AssessmentPackageReader:
                     triage_journal._decode_event(data)
                     triage[stem] = data
                 else:
-                    FindingEventType(data['event_type']); FindingState(data['to_state'])
-                    if data['from_state'] is not None:
-                        FindingState(data['from_state'])
-                    datetime.fromisoformat(data['detected_at'])
+                    FindingHistoryStore._deserialize(data)
                     technical[stem] = data
             elif path.startswith('triage/receipts/'):
                 if set(data) != {'version','sequence','status','event','history_ref'} or data['version']!=1 or type(data['sequence']) is not int or data['sequence']<1 or data['status'] not in ('done','aborted') or data['history_ref'] != 'triage_history' or data['event']['event_id']!=stem:
@@ -422,9 +449,8 @@ class AssessmentPackageReader:
         if set(genesis) != {'schema_version','chain_id','baseline_sha256'} or type(genesis['schema_version']) is not int or genesis['schema_version']!=1 or genesis['baseline_sha256']!=digest(canonical(baseline)):
             failure()
         identifier(genesis['chain_id'])
+        validate_baseline(baseline)
         expected = dict(baseline)
-        for eid,sha in expected.items():
-            identifier(eid); identifier(sha,64)
         previous, anomalies, previous_time = None, [], None
         event_paths = sorted(p for p in files if p.startswith('custody/events/'))
         used = {'custody/genesis.json','custody/baseline.json'}
@@ -527,11 +553,15 @@ class AssessmentExporter:
                         continue
                     validate_storage_path(directory,self.campaign.path)
                     for path in scan(directory):
-                        if path.name.startswith('.aegis-lock.sqlite') or path.suffix in ('.tmp','.txn'):
+                        if directory==self.campaign.findings_dir and path==journal:
+                            # This exact directory was validated and bounded above.
+                            validate_storage_path(path,self.campaign.path)
+                            continue
+                        validate_storage_path(path,self.campaign.path,regular=True)
+                        if path.name in {'.aegis-lock.sqlite'+suffix for suffix in ('','-journal','-wal','-shm')} or path.suffix in ('.tmp','.txn'):
                             continue
                         if path.suffix!='.json':
                             raise StorageIntegrityError('Unexpected export source entry')
-                        validate_storage_path(path,self.campaign.path,regular=True)
                         source_bytes+=len(read(path,16*MIB+256*1024))
                         if source_bytes>self.limits.max_metadata_bytes:
                             raise StorageIntegrityError('Export metadata limit exceeded')

@@ -157,3 +157,28 @@ anomalies, lock order, threads/spawned processes, deterministic exports, read-on
 source bytes/mtime, profiles, actual limits, malicious ZIP and sanitized errors.
 The CI matrix is Python 3.12/3.13 on Linux and Windows. Three existing Windows skips
 remain associated with fork and symlink privilege tests from earlier sprints.
+
+## PR #8 audit corrections
+
+Export recognizes only the exact `.triage-journal` directory already validated
+and bounded separately; unknown directories and linked/reparse storage remain errors.
+A completed triage operation can be exported without changing its source records.
+
+Direct `CustodyManager.commit_record` calls require the documented writer locks
+and revalidate the complete association, existing finding, deduplication key,
+current assessment configuration quotas and captured content before publishing
+any intent. Finding decoding is a bounded pure read under the existing finding
+lock; it does not acquire earlier history locks or recover a triage operation.
+Idempotent attachments continue through `EvidenceManager`.
+
+Package preflight counts actual central-directory headers with constant additional
+memory before constructing any `ZipInfo`. It reconciles EOCD and ZIP64 values,
+checks boundaries and limits the number of header reads. Each central entry is
+bounded to 512 bytes (including at most 128 filename bytes). Exactly 65,535 ordinary
+entries and legitimate ZIP64 archives are supported within local policy. These
+bounds do not claim a fixed total process-memory ceiling for all JSON decoding.
+
+Source and package readers share the object-only baseline validator and the pure
+legacy technical-history decoder. Optional history fields and naive legacy
+timestamps retain the source store's existing behavior. Invalid CLI profiles are
+reported with allowed options without echoing the supplied value.

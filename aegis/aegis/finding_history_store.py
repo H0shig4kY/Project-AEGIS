@@ -148,6 +148,12 @@ class FindingHistoryStore:
             )
         )
 
+        return FindingHistoryStore._deserialize(payload)
+
+    @staticmethod
+    def _deserialize(payload: dict) -> FindingEvent:
+        """Pure legacy-compatible domain decoder, also used by package readers."""
+
         from_state = (
             FindingState(
                 payload["from_state"]

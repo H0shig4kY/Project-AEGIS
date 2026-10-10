@@ -91,6 +91,14 @@ def identifier(value, length=32):
         fail()
 
 
+def validate_baseline(baseline):
+    """Pure inventory schema shared with independent package verification."""
+    if not isinstance(baseline, dict):
+        fail()
+    for evidence, sha in baseline.items():
+        identifier(evidence); identifier(sha, 64)
+
+
 def event_hash(event):
     return digest(b'AEGIS-custody-event-v1\0' + canonical({k: v for k, v in event.items() if k != 'event_sha256'}))
 
@@ -224,8 +232,7 @@ class CustodyReader:
                 not isinstance(baseline, dict) or genesis['baseline_sha256'] != digest(canonical(baseline))):
             fail()
         identifier(genesis['chain_id'])
-        for evidence, sha in baseline.items():
-            identifier(evidence); identifier(sha, 64)
+        validate_baseline(baseline)
         expected = dict(baseline)
         previous = None
         events, incomplete, anomalies = [], [], []
@@ -446,6 +453,32 @@ class CustodyManager(CustodyReader):
             state = self._state()
             if state is None:
                 fail()
+            # Revalidate even constructed/copied models. All checks precede intent
+            # publication and acquire no earlier lock in the writer graph.
+            try:
+                if not isinstance(record, EvidenceRecord):
+                    fail()
+                record = EvidenceRecord.model_validate(record.model_dump(mode='json', warnings=False))
+                bounded(canonical(record.model_dump(mode='json')), 65536)
+                if record.deduplication_key != association_key(record.finding_id, record.kind, record.origin, record.content_sha256):
+                    fail()
+                from aegis.finding_store import FindingStore
+                finding_path = self.campaign.findings_dir / (record.finding_id + '.json')
+                validate_storage_path(finding_path, self.campaign.path, regular=True)
+                finding = FindingStore._deserialize(strict_json(read(finding_path, 16 * MIB)))
+                if finding.finding_id != record.finding_id:
+                    fail()
+                evidence = EvidenceStore(self.campaign)
+                if any(existing.deduplication_key == record.deduplication_key for existing in evidence._records()):
+                    fail()
+                from aegis.evidence_manager import EvidenceManager
+                limits = EvidenceManager(self.campaign)._limits()
+                if (evidence.physical_bytes() > limits.max_assessment_bytes or
+                        (record.content_size is not None and record.content_size > limits.max_object_bytes)):
+                    fail()
+                evidence._verify(record)
+            except (OSError, ValueError, TypeError, KeyError, AttributeError, RecursionError, OverflowError):
+                raise StorageIntegrityError('Invalid custody association, finding, content or limits') from None
             if record.evidence_id in state['inventory']:
                 fail()
             last = state['events'][-1]

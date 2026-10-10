@@ -76,13 +76,16 @@ def register_custody_commands(app, findings_app):
 
     @assessment.command('export')
     def export(output: Path=typer.Option(...,'--output'),
-               profile: ExportProfile=typer.Option(ExportProfile.SHARE,'--profile'),
+               profile: str=typer.Option('share','--profile',help='Export profile: share or forensic.'),
                include_objects: bool=typer.Option(False,'--include-objects'),
                json_output: bool=typer.Option(False,'--json')):
         """Export outside the assessment. Share is minimization, not anonymization."""
-        if profile==ExportProfile.FORENSIC:
+        if profile not in ('share','forensic'):
+            typer.echo('Error: --profile must be share or forensic.',err=True)
+            raise typer.Exit(2)
+        if profile=='forensic':
             typer.echo('Warning: forensic packages may contain sensitive data in plaintext; the package is not encrypted.',err=True)
-        run(lambda: AssessmentExporter(campaign()).export(output,profile=profile.value,include_objects=include_objects))
+        run(lambda: AssessmentExporter(campaign()).export(output,profile=profile,include_objects=include_objects))
 
     @package.command('verify')
     def verify_package(path: Path,expected_sha256: str|None=typer.Option(None,'--expected-sha256'),
