@@ -19,6 +19,7 @@ from aegis.context import CampaignContext
 from aegis.finding_history_store import FindingHistoryStore
 from aegis.finding_store import FindingStore
 from aegis.models import FindingState, FindingTriageState
+from aegis.validation_errors import validation_summary
 
 
 class ReportFormat(str, Enum):
@@ -71,7 +72,7 @@ def _history(directory, records, *, operational):
             _event_key(payload)  # Validate that the stored timestamp can be ordered.
             events[event.event_id] = payload
         except (KeyError, TypeError, ValueError, AttributeError, OverflowError, RecursionError) as error:
-            raise StorageIntegrityError(f"Invalid history in {path}: {error}") from error
+            raise StorageIntegrityError(f"Invalid history in {path}: {validation_summary(error)}") from error
     return events
 
 
@@ -104,9 +105,12 @@ def _group_history(events):
     return grouped
 
 
-def build_report(campaign: CampaignContext, *, generated_at: datetime | None = None) -> dict:
+def build_report(campaign: CampaignContext, *, generated_at: datetime | None = None,
+                 schema_version: int = 1) -> dict:
     """Read and validate a complete snapshot, raising instead of repairing data."""
     generated_at = generated_at or datetime.now(timezone.utc)
+    if type(schema_version) is not int or schema_version not in (1, 2):
+        raise ValueError('Supported report schema versions are 1 and 2')
     if generated_at.tzinfo is None or generated_at.utcoffset() is None:
         raise ValueError("generated_at must be timezone-aware")
     with directory_lock(campaign.findings_dir, create=False):
@@ -126,7 +130,7 @@ def build_report(campaign: CampaignContext, *, generated_at: datetime | None = N
                 if "name" in config and config["name"] is not None and not isinstance(config["name"], str):
                     raise ValueError("assessment name must be a string or null")
             except (yaml.YAMLError, ValueError, UnicodeError, RecursionError) as error:
-                raise StorageIntegrityError(f"Invalid assessment configuration: {error}") from error
+                raise StorageIntegrityError(f"Invalid assessment configuration: {validation_summary(error)}") from error
             records = {}
             sources = {}
             for path in _json_paths(campaign.findings_dir):
@@ -138,7 +142,7 @@ def build_report(campaign: CampaignContext, *, generated_at: datetime | None = N
                     records[record.finding_id] = record
                     sources[record.finding_id] = source
                 except (KeyError, TypeError, ValueError, AttributeError, OverflowError, RecursionError) as error:
-                    raise StorageIntegrityError(f"Invalid finding in {path}: {error}") from error
+                    raise StorageIntegrityError(f"Invalid finding in {path}: {validation_summary(error)}") from error
             technical = _history(campaign.finding_history_dir, records, operational=False)
             histories = {directory: _history(directory, records, operational=True)
                          for directory in directories}
@@ -170,6 +174,25 @@ def build_report(campaign: CampaignContext, *, generated_at: datetime | None = N
                       "assessment": {"name": config["name"]} if "name" in config else {},
                       "generated_at": generated_at.astimezone(timezone.utc).isoformat(),
                       "summary": summary, "findings": findings}
+            if schema_version == 2:
+                from aegis.evidence_store import EvidenceReader
+                evidence_by_finding = {}
+                verified = EvidenceReader(campaign).all_verified()
+                for record, verification in verified:
+                    if record.finding_id not in records:
+                        raise StorageIntegrityError(f'Evidence references a missing finding: {record.evidence_id}')
+                    metadata = record.model_dump(mode='json')
+                    # Basenames remain private; hashes identify stored provenance.
+                    metadata['origin'].pop('source_name', None)
+                    metadata['origin'].pop('result_filename', None)
+                    evidence_by_finding.setdefault(record.finding_id, []).append({
+                        'metadata': metadata, 'verification': verification})
+                for item in findings:
+                    item['evidence'] = evidence_by_finding.get(item['record']['finding_id'], [])
+                result['schema_version'] = 2
+                summary['evidence'] = {'associations': len(verified),
+                    'captured': sum(r.content_sha256 is not None for r, _ in verified),
+                    'external_references': sum(r.content_sha256 is None for r, _ in verified)}
             # Validate the full export, including opaque extensions, before any output.
             try:
                 render_json(result)
@@ -228,6 +251,12 @@ def render_markdown(report: dict) -> str:
                 for field, value in sorted(event.items()):
                     lines.append(f"- {_literal(field)}: {_literal(value)}")
                 lines.append("")
+        if 'evidence' in item:
+            lines.extend(['### Evidence', ''])
+            if not item['evidence']:
+                lines.extend(['No managed evidence associations.', ''])
+            for evidence in item['evidence']:
+                lines.extend([f"- {_literal(evidence)}", ''])
     content = "\n".join(lines).rstrip() + "\n"
     content.encode("utf-8")
     return content

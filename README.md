@@ -35,3 +35,17 @@ aegis findings report --format markdown --output report.md
 
 Existing output files are rejected. Integrity errors stop export without repairing
 assessment data. See [report formats, examples and limits](docs/findings-reporting.md).
+
+## Evidence management
+
+Explicitly capture local files, snapshot stored observations or associate external
+references without network requests. Findings and triage states are unchanged.
+
+```console
+aegis findings evidence add-file <finding-id> capture.bin --actor analyst --reason "review" --json
+aegis findings evidence list <finding-id> --json
+aegis findings report --schema-version 2 --format json
+```
+
+Report schema 1 remains the default. Evidence schema 2 exports verified metadata,
+never captured blobs. See [limits, provenance, security and failure behaviour](docs/evidence-management.md).
